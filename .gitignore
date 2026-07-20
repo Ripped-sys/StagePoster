@@ -1,0 +1,23 @@
+# models
+models/
+*.safetensors
+*.ckpt
+*.pth
+
+# outputs
+outputs/
+*.png
+*.jpg
+*.jpeg
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+
+# venv
+venv/
+.env
+
+# comfyui
+ComfyUI/
