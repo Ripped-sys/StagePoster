@@ -30,3 +30,27 @@ Generated Poster
 - AMD W7900 ROCm inference ready
 - Z-Image Turbo deployed
 - ComfyUI workflow ready
+
+
+## MVP-0: Poster Generation Pipeline
+
+Goal:
+输入:
+- artist
+- event info
+- logo
+- style
+
+输出:
+- generated poster
+
+Pipeline:
+API
+ ↓
+Prompt Builder
+ ↓
+ComfyUI
+ ↓
+Image Generation
+ ↓
+Result Storage
