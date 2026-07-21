@@ -147,6 +147,8 @@ func main() {
 		posterFlow,
 		os.Getenv("POSTER_API_TOKEN"),
 		env("CORS_ORIGIN", "*"),
+	).WithAI(
+		 api.NewAIConfigFromEnv(),
 	)
 
 	server := &http.Server{

@@ -159,7 +159,35 @@ func (s *Server) handlePosterRoute(
 			posterID,
 			segments[2],
 		)
+ case len(segments) == 2 &&
+	segments[1] == "review" &&
+	request.Method == http.MethodPost:
 
+	s.handlePosterReview(
+		writer,
+		request,
+		posterID,
+	)
+
+case len(segments) == 2 &&
+	segments[1] == "reviews" &&
+	request.Method == http.MethodGet:
+
+	s.handlePosterReviews(
+		writer,
+		request,
+		posterID,
+	)
+
+case len(segments) == 2 &&
+	segments[1] == "timeline" &&
+	request.Method == http.MethodGet:
+
+	s.handlePosterTimeline(
+		writer,
+		request,
+		posterID,
+	)
 	default:
 		writeError(
 			writer,

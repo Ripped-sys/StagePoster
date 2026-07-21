@@ -14,16 +14,23 @@ import (
 	posterflow "github.com/Ripped-sys/StagePoster/backend/internal/poster"
 	"github.com/Ripped-sys/StagePoster/backend/internal/repository"
 	"github.com/Ripped-sys/StagePoster/backend/internal/service"
+	"github.com/Ripped-sys/StagePoster/backend/internal/ai"
 )
 
 type Server struct {
 	service      *service.PosterService
 	assetService *service.AssetService
 	posterFlow   *posterflow.Service
-	apiToken     string
-	corsOrigin   string
-}
 
+	aiClient  *ai.Client
+	aiService *ai.Service
+	aiRuntime *ai.Runtime
+	aiURL     string
+	aiModel   string
+
+	apiToken   string
+	corsOrigin string
+}
 func NewServer(
 	posterService *service.PosterService,
 	assetService *service.AssetService,
@@ -48,6 +55,15 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc(
+	"/api/ai/design",
+	s.handleAIDesign,
+)
+
+mux.HandleFunc(
+	"/api/system/dependencies",
+	s.handleDependencies,
+)
 	mux.HandleFunc("/api/generate", s.handleGenerate)
 	mux.HandleFunc("/api/posters", s.handlePosters)
 	mux.HandleFunc("/api/posters/", s.handlePosterRoute)

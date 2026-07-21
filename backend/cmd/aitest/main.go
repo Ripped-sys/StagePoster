@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Ripped-sys/StagePoster/backend/internal/ai"
@@ -26,19 +27,22 @@ func main() {
 			"VLM_MODEL",
 			"stageposter-vlm",
 		),
-		120*time.Second,
+		3*time.Minute,
 	)
 
 	service := ai.NewService(client)
 
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
-		3*time.Minute,
+		5*time.Minute,
 	)
 	defer cancel()
 
 	if err := service.Health(ctx); err != nil {
-		log.Fatalf("VLM health failed: %v", err)
+		log.Fatalf(
+			"VLM health failed: %v",
+			err,
+		)
 	}
 
 	event := domain.EventBrief{
@@ -71,22 +75,32 @@ func main() {
 		ctx,
 		event,
 		visual,
-		"黑色王座、巨大羽翼、哥特王国，整体要高级且有压迫感。",
+		"黑色王座、巨大羽翼、哥特王国，高级、有压迫感，禁止生成文字。",
 	)
 	if err != nil {
-		log.Fatalf("design plan failed: %v", err)
+		log.Fatalf(
+			"design planning failed: %v",
+			err,
+		)
 	}
 
 	fmt.Printf(
-		"DESIGN latency=%s tokens=%d\n",
+		"\nDESIGN latency=%s promptTokens=%d completionTokens=%d\n",
 		metrics.Latency,
-		metrics.TotalTokens,
+		metrics.PromptTokens,
+		metrics.CompletionTokens,
 	)
 
 	printJSON(plans)
 
-	reviewImage := os.Getenv("REVIEW_IMAGE")
+	reviewImage := strings.TrimSpace(
+		os.Getenv("REVIEW_IMAGE"),
+	)
+
 	if reviewImage == "" {
+		fmt.Println(
+			"\nREVIEW_IMAGE not set; skipping visual review",
+		)
 		return
 	}
 
@@ -98,13 +112,17 @@ func main() {
 		&plans.Plans[0],
 	)
 	if err != nil {
-		log.Fatalf("review failed: %v", err)
+		log.Fatalf(
+			"visual review failed: %v",
+			err,
+		)
 	}
 
 	fmt.Printf(
-		"REVIEW latency=%s tokens=%d\n",
+		"\nREVIEW latency=%s promptTokens=%d completionTokens=%d\n",
 		reviewMetrics.Latency,
-		reviewMetrics.TotalTokens,
+		reviewMetrics.PromptTokens,
+		reviewMetrics.CompletionTokens,
 	)
 
 	printJSON(review)
@@ -125,7 +143,10 @@ func env(
 	key string,
 	fallback string,
 ) string {
-	value := os.Getenv(key)
+	value := strings.TrimSpace(
+		os.Getenv(key),
+	)
+
 	if value == "" {
 		return fallback
 	}

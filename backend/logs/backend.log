@@ -1,0 +1,10 @@
+nohup: ignoring input
+2026/07/21 16:35:52 Poster backend listening on :8080
+2026/07/21 16:35:52 ComfyUI URL: http://127.0.0.1:8188
+2026/07/21 16:35:52 Workflow: /workspace/poster-engine/workflows/z_image_poster_v1.json
+2026/07/21 16:35:52 Workflow identity: poster-text@1.0.0
+2026/07/21 16:35:52 Database: /workspace/poster-engine/backend/data/poster.db
+2026/07/21 16:35:52 Storage: /workspace/poster-engine/backend/storage/jobs
+2026/07/21 16:35:52 Asset storage: /workspace/poster-engine/backend/storage/assets
+2026/07/21 16:35:52 Poster outputs: /workspace/poster-engine/backend/storage/posters
+2026/07/21 16:35:52 Bindings: {Prompt:0xc00009ac80 NegativePrompt:<nil> Seed:0xc00009acc0}
