@@ -45,3 +45,5 @@ nohup: ignoring input
 2026-07-21T06:54:45Z INF precheck component="Cloudflare API" details="API is reachable" run_id=97a1f81e-b0f0-4689-837f-af6a25dcbc6a status=pass target=api.cloudflare.com:443
 2026-07-21T06:54:45Z INF precheck complete hard_fail=false run_id=97a1f81e-b0f0-4689-837f-af6a25dcbc6a suggested_protocol=quic
 2026-07-21T07:09:44Z ERR Failed to refresh DNS local resolver error="lookup region1.v2.argotunnel.com: i/o timeout"
+2026-07-21T07:49:50Z ERR Failed to refresh DNS local resolver error="lookup region1.v2.argotunnel.com: i/o timeout"
+2026-07-21T07:54:48Z ERR Failed to refresh feature selector error="lookup cfd-features.argotunnel.com on 8.8.4.4:53: dial udp 8.8.4.4:53: i/o timeout"

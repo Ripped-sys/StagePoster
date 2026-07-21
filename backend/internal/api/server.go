@@ -3,23 +3,31 @@ package api
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Ripped-sys/StagePoster/backend/internal/domain"
+	posterflow "github.com/Ripped-sys/StagePoster/backend/internal/poster"
+	"github.com/Ripped-sys/StagePoster/backend/internal/repository"
 	"github.com/Ripped-sys/StagePoster/backend/internal/service"
 )
 
 type Server struct {
-	service    *service.PosterService
-	apiToken   string
-	corsOrigin string
+	service      *service.PosterService
+	assetService *service.AssetService
+	posterFlow   *posterflow.Service
+	apiToken     string
+	corsOrigin   string
 }
 
 func NewServer(
 	posterService *service.PosterService,
+	assetService *service.AssetService,
+	posterFlow *posterflow.Service,
 	apiToken string,
 	corsOrigin string,
 ) *Server {
@@ -28,9 +36,11 @@ func NewServer(
 	}
 
 	return &Server{
-		service:    posterService,
-		apiToken:   apiToken,
-		corsOrigin: corsOrigin,
+		service:      posterService,
+		assetService: assetService,
+		posterFlow:   posterFlow,
+		apiToken:     apiToken,
+		corsOrigin:   corsOrigin,
 	}
 }
 
@@ -39,6 +49,11 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/api/generate", s.handleGenerate)
+	mux.HandleFunc("/api/posters", s.handlePosters)
+	mux.HandleFunc("/api/posters/", s.handlePosterRoute)
+	mux.HandleFunc("/api/assets", s.handleAssets)
+	mux.HandleFunc("/api/assets/", s.handleAsset)
+	mux.HandleFunc("/api/jobs", s.handleJobList)
 	mux.HandleFunc("/api/jobs/", s.handleJobs)
 
 	return s.cors(s.auth(mux))
@@ -49,11 +64,7 @@ func (s *Server) handleHealth(
 	request *http.Request,
 ) {
 	if request.Method != http.MethodGet {
-		writeError(
-			writer,
-			http.StatusMethodNotAllowed,
-			"method not allowed",
-		)
+		writeError(writer, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
@@ -78,6 +89,7 @@ func (s *Server) handleHealth(
 		map[string]any{
 			"status":        "ok",
 			"comfy":         "connected",
+			"database":      "connected",
 			"bindings":      s.service.Bindings(),
 			"tokenRequired": s.apiToken != "",
 		},
@@ -89,11 +101,7 @@ func (s *Server) handleGenerate(
 	request *http.Request,
 ) {
 	if request.Method != http.MethodPost {
-		writeError(
-			writer,
-			http.StatusMethodNotAllowed,
-			"method not allowed",
-		)
+		writeError(writer, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
@@ -121,20 +129,50 @@ func (s *Server) handleGenerate(
 	defer cancel()
 
 	result, err := s.service.Generate(ctx, payload)
-	if err != nil {
-		writeError(
-			writer,
-			http.StatusBadGateway,
-			err.Error(),
-		)
+	if errors.Is(err, service.ErrPromptRequired) {
+		writeError(writer, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	writeJSON(
-		writer,
-		http.StatusAccepted,
-		result,
-	)
+	if err != nil {
+		writeError(writer, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	writeJSON(writer, http.StatusAccepted, result)
+}
+
+func (s *Server) handleJobList(
+	writer http.ResponseWriter,
+	request *http.Request,
+) {
+	if request.Method != http.MethodGet {
+		writeError(writer, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	limit := 20
+
+	if rawLimit := request.URL.Query().Get("limit"); rawLimit != "" {
+		parsedLimit, err := strconv.Atoi(rawLimit)
+		if err != nil {
+			writeError(writer, http.StatusBadRequest, "invalid limit")
+			return
+		}
+
+		limit = parsedLimit
+	}
+
+	ctx, cancel := contextWithTimeout(request, 20*time.Second)
+	defer cancel()
+
+	result, err := s.service.ListJobs(ctx, limit)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(writer, http.StatusOK, result)
 }
 
 func (s *Server) handleJobs(
@@ -142,11 +180,7 @@ func (s *Server) handleJobs(
 	request *http.Request,
 ) {
 	if request.Method != http.MethodGet {
-		writeError(
-			writer,
-			http.StatusMethodNotAllowed,
-			"method not allowed",
-		)
+		writeError(writer, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
@@ -157,11 +191,7 @@ func (s *Server) handleJobs(
 	path = strings.Trim(path, "/")
 
 	if path == "" {
-		writeError(
-			writer,
-			http.StatusBadRequest,
-			"job id is required",
-		)
+		writeError(writer, http.StatusBadRequest, "job id is required")
 		return
 	}
 
@@ -181,16 +211,17 @@ func (s *Server) handleStatus(
 	request *http.Request,
 	jobID string,
 ) {
-	ctx, cancel := contextWithTimeout(request, 20*time.Second)
+	ctx, cancel := contextWithTimeout(request, 30*time.Second)
 	defer cancel()
 
 	result, err := s.service.Status(ctx, jobID)
+	if errors.Is(err, repository.ErrNotFound) {
+		writeError(writer, http.StatusNotFound, "job not found")
+		return
+	}
+
 	if err != nil {
-		writeError(
-			writer,
-			http.StatusBadGateway,
-			err.Error(),
-		)
+		writeError(writer, http.StatusBadGateway, err.Error())
 		return
 	}
 
@@ -205,19 +236,33 @@ func (s *Server) handleResult(
 	ctx, cancel := contextWithTimeout(request, 60*time.Second)
 	defer cancel()
 
-	response, err := s.service.OpenResult(ctx, jobID)
-	if err != nil {
-		writeError(
-			writer,
-			http.StatusConflict,
-			err.Error(),
-		)
+	result, err := s.service.OpenResult(ctx, jobID)
+
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		writeError(writer, http.StatusNotFound, "job not found")
+		return
+
+	case errors.Is(err, service.ErrResultNotReady):
+		writeError(writer, http.StatusConflict, err.Error())
+		return
+
+	case errors.Is(err, service.ErrGenerationFailed):
+		writeError(writer, http.StatusConflict, err.Error())
+		return
+
+	case err != nil:
+		writeError(writer, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer response.Body.Close()
 
-	if contentType := response.Header.Get("Content-Type"); contentType != "" {
-		writer.Header().Set("Content-Type", contentType)
+	defer result.Body.Close()
+
+	if result.ContentType != "" {
+		writer.Header().Set(
+			"Content-Type",
+			result.ContentType,
+		)
 	}
 
 	writer.Header().Set(
@@ -226,7 +271,7 @@ func (s *Server) handleResult(
 	)
 
 	writer.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(writer, response.Body)
+	_, _ = io.Copy(writer, result.Body)
 }
 
 func (s *Server) auth(next http.Handler) http.Handler {
@@ -258,11 +303,7 @@ func (s *Server) auth(next http.Handler) http.Handler {
 			) == 1
 
 			if !valid {
-				writeError(
-					writer,
-					http.StatusUnauthorized,
-					"unauthorized",
-				)
+				writeError(writer, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 
@@ -278,10 +319,12 @@ func (s *Server) cors(next http.Handler) http.Handler {
 				"Access-Control-Allow-Origin",
 				s.corsOrigin,
 			)
+
 			writer.Header().Set(
 				"Access-Control-Allow-Headers",
 				"Content-Type, Authorization, X-Poster-Token",
 			)
+
 			writer.Header().Set(
 				"Access-Control-Allow-Methods",
 				"GET, POST, OPTIONS",
@@ -306,6 +349,7 @@ func writeJSON(
 		"Content-Type",
 		"application/json",
 	)
+
 	writer.WriteHeader(status)
 	_ = json.NewEncoder(writer).Encode(value)
 }

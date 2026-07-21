@@ -2,32 +2,68 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"net/http"
+	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/Ripped-sys/StagePoster/backend/internal/comfy"
 	"github.com/Ripped-sys/StagePoster/backend/internal/domain"
+	"github.com/Ripped-sys/StagePoster/backend/internal/repository"
+	"github.com/Ripped-sys/StagePoster/backend/internal/storage"
 )
 
+var (
+	ErrPromptRequired   = errors.New("prompt is required")
+	ErrResultNotReady   = errors.New("result is not ready")
+	ErrGenerationFailed = errors.New("generation failed")
+)
+
+type ResultFile struct {
+	Body        io.ReadCloser
+	Filename    string
+	ContentType string
+}
+
 type PosterService struct {
-	client   *comfy.Client
-	template *comfy.Template
+	client          *comfy.Client
+	template        *comfy.Template
+	repository      *repository.Repository
+	fileStore       *storage.FileStore
+	workflowKey     string
+	workflowVersion string
 }
 
 func NewPosterService(
 	client *comfy.Client,
 	template *comfy.Template,
+	repositoryInstance *repository.Repository,
+	fileStore *storage.FileStore,
+	workflowKey string,
+	workflowVersion string,
 ) *PosterService {
 	return &PosterService{
-		client:   client,
-		template: template,
+		client:          client,
+		template:        template,
+		repository:      repositoryInstance,
+		fileStore:       fileStore,
+		workflowKey:     workflowKey,
+		workflowVersion: workflowVersion,
 	}
 }
 
 func (s *PosterService) Health(ctx context.Context) error {
-	return s.client.Health(ctx)
+	if err := s.repository.Ping(ctx); err != nil {
+		return err
+	}
+
+	if err := s.client.Health(ctx); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (s *PosterService) Bindings() comfy.Bindings {
@@ -39,15 +75,49 @@ func (s *PosterService) Generate(
 	request domain.GenerateRequest,
 ) (domain.GenerateResponse, error) {
 	request.Prompt = strings.TrimSpace(request.Prompt)
+	request.NegativePrompt = strings.TrimSpace(
+		request.NegativePrompt,
+	)
 
 	if request.Prompt == "" {
-		return domain.GenerateResponse{},
-			errors.New("prompt is required")
+		return domain.GenerateResponse{}, ErrPromptRequired
 	}
 
 	seed := time.Now().UnixNano() & 0x7fffffffffffffff
 	if request.Seed != nil {
 		seed = *request.Seed
+	}
+
+	jobID, err := domain.NewID("job_")
+	if err != nil {
+		return domain.GenerateResponse{}, err
+	}
+
+	requestJSON, err := json.Marshal(request)
+	if err != nil {
+		return domain.GenerateResponse{}, fmt.Errorf(
+			"marshal generation request: %w",
+			err,
+		)
+	}
+
+	now := time.Now().UTC()
+
+	job := domain.Job{
+		ID:              jobID,
+		WorkflowKey:     s.workflowKey,
+		WorkflowVersion: s.workflowVersion,
+		Prompt:          request.Prompt,
+		NegativePrompt:  request.NegativePrompt,
+		Seed:            seed,
+		Status:          domain.JobStatusQueued,
+		RequestJSON:     string(requestJSON),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+
+	if err := s.repository.CreateJob(ctx, job); err != nil {
+		return domain.GenerateResponse{}, err
 	}
 
 	workflow, err := s.template.Build(
@@ -56,18 +126,31 @@ func (s *PosterService) Generate(
 		seed,
 	)
 	if err != nil {
+		s.failJob(ctx, jobID, err)
 		return domain.GenerateResponse{}, err
 	}
 
 	promptID, err := s.client.Submit(ctx, workflow)
 	if err != nil {
+		s.failJob(ctx, jobID, err)
+		return domain.GenerateResponse{}, err
+	}
+
+	startedAt := time.Now().UTC()
+
+	if err := s.repository.MarkSubmitted(
+		ctx,
+		jobID,
+		promptID,
+		startedAt,
+	); err != nil {
 		return domain.GenerateResponse{}, err
 	}
 
 	return domain.GenerateResponse{
-		JobID:    promptID,
+		JobID:    jobID,
 		PromptID: promptID,
-		Status:   "queued",
+		Status:   domain.JobStatusRunning,
 		Seed:     seed,
 	}, nil
 }
@@ -76,47 +159,310 @@ func (s *PosterService) Status(
 	ctx context.Context,
 	jobID string,
 ) (domain.JobResponse, error) {
-	status, image, messages, err :=
-		s.client.Inspect(ctx, jobID)
-
+	job, err := s.repository.GetJob(ctx, jobID)
 	if err != nil {
 		return domain.JobResponse{}, err
 	}
 
-	result := domain.JobResponse{
-		JobID:    jobID,
-		Status:   status,
-		Image:    image,
-		Messages: messages,
+	if job.Status == domain.JobStatusQueued ||
+		job.Status == domain.JobStatusRunning {
+		if err := s.ReconcileJob(ctx, jobID); err != nil {
+			return domain.JobResponse{}, err
+		}
+
+		job, err = s.repository.GetJob(ctx, jobID)
+		if err != nil {
+			return domain.JobResponse{}, err
+		}
 	}
 
-	if image != nil {
-		result.ResultURL = "/api/jobs/" +
-			jobID +
-			"/result"
+	return s.jobResponse(ctx, job)
+}
+
+func (s *PosterService) ListJobs(
+	ctx context.Context,
+	limit int,
+) (domain.JobListResponse, error) {
+	jobs, err := s.repository.ListJobs(ctx, limit)
+	if err != nil {
+		return domain.JobListResponse{}, err
 	}
 
-	return result, nil
+	items := make([]domain.JobResponse, 0, len(jobs))
+
+	for _, job := range jobs {
+		response, err := s.jobResponse(ctx, job)
+		if err != nil {
+			return domain.JobListResponse{}, err
+		}
+
+		items = append(items, response)
+	}
+
+	return domain.JobListResponse{
+		Items: items,
+		Count: len(items),
+	}, nil
 }
 
 func (s *PosterService) OpenResult(
 	ctx context.Context,
 	jobID string,
-) (*http.Response, error) {
-	status, image, _, err :=
-		s.client.Inspect(ctx, jobID)
+) (ResultFile, error) {
+	job, err := s.repository.GetJob(ctx, jobID)
+	if err != nil {
+		return ResultFile{}, err
+	}
+
+	if job.Status == domain.JobStatusQueued ||
+		job.Status == domain.JobStatusRunning {
+		if err := s.ReconcileJob(ctx, jobID); err != nil {
+			return ResultFile{}, err
+		}
+
+		job, err = s.repository.GetJob(ctx, jobID)
+		if err != nil {
+			return ResultFile{}, err
+		}
+	}
+
+	if job.Status == domain.JobStatusFailed {
+		return ResultFile{}, ErrGenerationFailed
+	}
+
+	output, err := s.repository.GetOutput(
+		ctx,
+		jobID,
+		"poster",
+	)
+	if errors.Is(err, repository.ErrNotFound) {
+		return ResultFile{}, ErrResultNotReady
+	}
 
 	if err != nil {
-		return nil, err
+		return ResultFile{}, err
 	}
 
-	if status == "failed" {
-		return nil, errors.New("generation failed")
+	file, err := s.fileStore.Open(output)
+	if err != nil {
+		return ResultFile{}, err
 	}
 
-	if status != "succeeded" || image == nil {
-		return nil, errors.New("result is not ready")
+	return ResultFile{
+		Body:        file,
+		Filename:    output.Filename,
+		ContentType: output.MimeType,
+	}, nil
+}
+
+func (s *PosterService) ReconcileActiveJobs(
+	ctx context.Context,
+	limit int,
+) error {
+	jobs, err := s.repository.ListActiveJobs(ctx, limit)
+	if err != nil {
+		return err
 	}
 
-	return s.client.OpenImage(ctx, *image)
+	var reconciliationErrors []error
+
+	for _, job := range jobs {
+		if err := s.ReconcileJob(ctx, job.ID); err != nil {
+			reconciliationErrors = append(
+				reconciliationErrors,
+				fmt.Errorf(
+					"reconcile %s: %w",
+					job.ID,
+					err,
+				),
+			)
+		}
+	}
+
+	return errors.Join(reconciliationErrors...)
+}
+
+func (s *PosterService) ReconcileJob(
+	ctx context.Context,
+	jobID string,
+) error {
+	job, err := s.repository.GetJob(ctx, jobID)
+	if err != nil {
+		return err
+	}
+
+	switch job.Status {
+	case domain.JobStatusSucceeded,
+		domain.JobStatusFailed,
+		domain.JobStatusCanceled:
+		return nil
+	}
+
+	if job.ComfyPromptID == "" {
+		if time.Since(job.CreatedAt) > 2*time.Minute {
+			return s.repository.MarkFailed(
+				ctx,
+				jobID,
+				"submission interrupted before ComfyUI accepted the job",
+				time.Now().UTC(),
+			)
+		}
+
+		return nil
+	}
+
+	status, image, messages, err := s.client.Inspect(
+		ctx,
+		job.ComfyPromptID,
+	)
+	if err != nil {
+		return err
+	}
+
+	switch status {
+	case "running":
+		return nil
+
+	case "failed":
+		message := encodeMessages(messages)
+
+		if message == "" {
+			message = "ComfyUI generation failed"
+		}
+
+		return s.repository.MarkFailed(
+			ctx,
+			jobID,
+			message,
+			time.Now().UTC(),
+		)
+
+	case "succeeded":
+		if image == nil {
+			return s.repository.MarkFailed(
+				ctx,
+				jobID,
+				"ComfyUI completed without an image output",
+				time.Now().UTC(),
+			)
+		}
+
+		existingOutput, outputErr :=
+			s.repository.GetOutput(ctx, jobID, "poster")
+
+		if outputErr == nil {
+			return s.repository.CompleteJob(
+				ctx,
+				jobID,
+				existingOutput,
+				time.Now().UTC(),
+			)
+		}
+
+		if !errors.Is(outputErr, repository.ErrNotFound) {
+			return outputErr
+		}
+
+		response, err := s.client.OpenImage(ctx, *image)
+		if err != nil {
+			return err
+		}
+		defer response.Body.Close()
+
+		output, err := s.fileStore.SavePoster(
+			jobID,
+			image.Filename,
+			response.Header.Get("Content-Type"),
+			response.Body,
+		)
+		if err != nil {
+			return err
+		}
+
+		return s.repository.CompleteJob(
+			ctx,
+			jobID,
+			output,
+			time.Now().UTC(),
+		)
+	}
+
+	return nil
+}
+
+func (s *PosterService) jobResponse(
+	ctx context.Context,
+	job domain.Job,
+) (domain.JobResponse, error) {
+	response := domain.JobResponse{
+		JobID:           job.ID,
+		PromptID:        job.ComfyPromptID,
+		Status:          job.Status,
+		Prompt:          job.Prompt,
+		NegativePrompt:  job.NegativePrompt,
+		Seed:            job.Seed,
+		WorkflowKey:     job.WorkflowKey,
+		WorkflowVersion: job.WorkflowVersion,
+		Error:           job.ErrorMessage,
+		CreatedAt:       job.CreatedAt,
+		StartedAt:       job.StartedAt,
+		CompletedAt:     job.CompletedAt,
+		UpdatedAt:       job.UpdatedAt,
+	}
+
+	output, err := s.repository.GetOutput(
+		ctx,
+		job.ID,
+		"poster",
+	)
+	if errors.Is(err, repository.ErrNotFound) {
+		return response, nil
+	}
+
+	if err != nil {
+		return domain.JobResponse{}, err
+	}
+
+	response.Image = &domain.ImageMeta{
+		Filename:  output.Filename,
+		Subfolder: "",
+		Type:      "stored",
+	}
+
+	response.ResultURL =
+		"/api/jobs/" + job.ID + "/result"
+
+	return response, nil
+}
+
+func (s *PosterService) failJob(
+	ctx context.Context,
+	jobID string,
+	cause error,
+) {
+	failContext, cancel := context.WithTimeout(
+		context.Background(),
+		5*time.Second,
+	)
+	defer cancel()
+
+	_ = s.repository.MarkFailed(
+		failContext,
+		jobID,
+		cause.Error(),
+		time.Now().UTC(),
+	)
+}
+
+func encodeMessages(messages []any) string {
+	if len(messages) == 0 {
+		return ""
+	}
+
+	raw, err := json.Marshal(messages)
+	if err != nil {
+		return fmt.Sprintf("%v", messages)
+	}
+
+	return string(raw)
 }

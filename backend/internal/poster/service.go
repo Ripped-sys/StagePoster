@@ -1,0 +1,643 @@
+package poster
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/Ripped-sys/StagePoster/backend/internal/domain"
+	"github.com/Ripped-sys/StagePoster/backend/internal/repository"
+	coreservice "github.com/Ripped-sys/StagePoster/backend/internal/service"
+)
+
+var (
+	ErrInvalidPosterBrief = errors.New("invalid poster brief")
+	ErrCandidateNotReady  = errors.New("candidate is not ready")
+)
+
+type Service struct {
+	repository *repository.Repository
+	core       *coreservice.PosterService
+	planner    *Planner
+	evaluator  *Evaluator
+	composer   CompositionEngine
+
+	reconcileMu sync.Mutex
+}
+
+func NewService(
+	repositoryInstance *repository.Repository,
+	core *coreservice.PosterService,
+	planner *Planner,
+	evaluator *Evaluator,
+	compositionEngine CompositionEngine,
+) *Service {
+	return &Service{
+		repository: repositoryInstance,
+		core:       core,
+		planner:    planner,
+		evaluator:  evaluator,
+		composer:   compositionEngine,
+	}
+}
+
+func (s *Service) Create(
+	ctx context.Context,
+	request domain.CreatePosterRequest,
+) (domain.PosterResponse, error) {
+	request.Event.Title = strings.TrimSpace(
+		request.Event.Title,
+	)
+
+	if request.Event.Title == "" {
+		return domain.PosterResponse{},
+			fmt.Errorf(
+				"%w: event title is required",
+				ErrInvalidPosterBrief,
+			)
+	}
+
+	if strings.TrimSpace(request.Visual.Style) == "" {
+		request.Visual.Style = "metal-gothic-v1"
+	}
+
+	specs, err := s.planner.Plan(request)
+	if err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	if len(specs) != 3 {
+		return domain.PosterResponse{},
+			errors.New(
+				"candidate planner must return exactly 3 candidates",
+			)
+	}
+
+	posterID, err := domain.NewID("poster_")
+	if err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	goal := domain.GoalContract{
+		Width:               1024,
+		Height:              1536,
+		AllowPeople:         false,
+		AllowReadableText:   false,
+		RequireCentralMotif: true,
+		MaxAttempts:         2,
+	}
+
+	eventJSON, err := marshalJSON(request.Event)
+	if err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	brandingJSON, err := marshalJSON(request.Branding)
+	if err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	visualJSON, err := marshalJSON(request.Visual)
+	if err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	goalJSON, err := marshalJSON(goal)
+	if err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	now := time.Now().UTC()
+
+	posterRecord := domain.PosterRecord{
+		ID:           posterID,
+		Status:       domain.PosterStatusPlanning,
+		StyleKey:     request.Visual.Style,
+		EventJSON:    eventJSON,
+		BrandingJSON: brandingJSON,
+		VisualJSON:   visualJSON,
+		GoalJSON:     goalJSON,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	if err := s.repository.CreatePoster(
+		ctx,
+		posterRecord,
+	); err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	baseSeed := time.Now().UnixNano() &
+		0x7fffffffffffffff
+
+	for index, spec := range specs {
+		compiledPrompt := s.planner.BuildPrompt(
+			request,
+			spec,
+		)
+
+		seed := baseSeed +
+			int64((index+1)*100003)
+
+		generation, err := s.core.Generate(
+			ctx,
+			domain.GenerateRequest{
+				Prompt: compiledPrompt,
+				Seed:   &seed,
+			},
+		)
+		if err != nil {
+			_ = s.repository.UpdatePosterStatus(
+				context.Background(),
+				posterID,
+				domain.PosterStatusFailed,
+				err.Error(),
+			)
+
+			return domain.PosterResponse{}, err
+		}
+
+		candidateID, err := domain.NewID("candidate_")
+		if err != nil {
+			return domain.PosterResponse{}, err
+		}
+
+		specJSON, err := marshalJSON(spec)
+		if err != nil {
+			return domain.PosterResponse{}, err
+		}
+
+		candidateNow := time.Now().UTC()
+
+		candidate := domain.CandidateRecord{
+			ID:             candidateID,
+			PosterID:       posterID,
+			JobID:          generation.JobID,
+			VariantIndex:   index,
+			VariantKey:     spec.VariantKey,
+			VariantName:    spec.VariantName,
+			SpecJSON:       specJSON,
+			CompiledPrompt: compiledPrompt,
+			Seed:           seed,
+			Attempt:        1,
+			Status:         domain.CandidateStatusGenerating,
+			Passed:         false,
+			Selected:       false,
+			CreatedAt:      candidateNow,
+			UpdatedAt:      candidateNow,
+		}
+
+		if err := s.repository.CreateCandidate(
+			ctx,
+			candidate,
+		); err != nil {
+			_ = s.repository.UpdatePosterStatus(
+				context.Background(),
+				posterID,
+				domain.PosterStatusFailed,
+				err.Error(),
+			)
+
+			return domain.PosterResponse{}, err
+		}
+	}
+
+	if err := s.repository.UpdatePosterStatus(
+		ctx,
+		posterID,
+		domain.PosterStatusGenerating,
+		"",
+	); err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	return s.Get(ctx, posterID)
+}
+
+func (s *Service) Get(
+	ctx context.Context,
+	posterID string,
+) (domain.PosterResponse, error) {
+	if err := s.ReconcilePoster(
+		ctx,
+		posterID,
+	); err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	posterRecord, err := s.repository.GetPoster(
+		ctx,
+		posterID,
+	)
+	if err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	candidates, err := s.repository.ListCandidates(
+		ctx,
+		posterID,
+	)
+	if err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	response := domain.PosterResponse{
+		PosterID:            posterRecord.ID,
+		Status:              posterRecord.Status,
+		SelectedCandidateID: posterRecord.SelectedCandidateID,
+		Error:               posterRecord.ErrorMessage,
+		CreatedAt:           posterRecord.CreatedAt,
+		UpdatedAt:           posterRecord.UpdatedAt,
+		Progress: domain.PosterProgress{
+			Total: len(candidates),
+		},
+		Candidates: make(
+			[]domain.CandidateResponse,
+			0,
+			len(candidates),
+		),
+	}
+
+	for _, candidate := range candidates {
+		item := domain.CandidateResponse{
+			CandidateID: candidate.ID,
+			VariantKey:  candidate.VariantKey,
+			VariantName: candidate.VariantName,
+			Status:      candidate.Status,
+			Attempt:     candidate.Attempt,
+			Selected:    candidate.Selected,
+			Error:       candidate.ErrorMessage,
+		}
+
+		if candidate.Status == domain.CandidateStatusReady {
+			item.ImageURL = fmt.Sprintf(
+				"/api/posters/%s/candidates/%s/image",
+				posterID,
+				candidate.ID,
+			)
+		}
+
+		if candidate.Status == domain.CandidateStatusReady ||
+			candidate.Status == domain.CandidateStatusFailed {
+			response.Progress.Completed++
+		}
+
+		response.Candidates = append(
+			response.Candidates,
+			item,
+		)
+	}
+
+	if posterRecord.Status == domain.PosterStatusSucceeded {
+		response.ResultURL = fmt.Sprintf(
+			"/api/posters/%s/result",
+			posterID,
+		)
+		response.ThumbnailURL = fmt.Sprintf(
+			"/api/posters/%s/thumbnail",
+			posterID,
+		)
+	}
+
+	return response, nil
+}
+
+func (s *Service) Select(
+	ctx context.Context,
+	posterID string,
+	candidateID string,
+) (domain.PosterResponse, error) {
+	if strings.TrimSpace(candidateID) == "" {
+		return domain.PosterResponse{},
+			ErrCandidateNotReady
+	}
+
+	if err := s.ReconcilePoster(
+		ctx,
+		posterID,
+	); err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	if err := s.repository.SelectCandidate(
+		ctx,
+		posterID,
+		candidateID,
+	); err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	return s.Get(ctx, posterID)
+}
+
+func (s *Service) OpenCandidate(
+	ctx context.Context,
+	posterID string,
+	candidateID string,
+) (coreservice.ResultFile, error) {
+	candidates, err := s.repository.ListCandidates(
+		ctx,
+		posterID,
+	)
+	if err != nil {
+		return coreservice.ResultFile{}, err
+	}
+
+	for _, candidate := range candidates {
+		if candidate.ID != candidateID {
+			continue
+		}
+
+		if candidate.Status != domain.CandidateStatusReady ||
+			!candidate.Passed {
+			return coreservice.ResultFile{},
+				ErrCandidateNotReady
+		}
+
+		return s.core.OpenResult(
+			ctx,
+			candidate.JobID,
+		)
+	}
+
+	return coreservice.ResultFile{},
+		repository.ErrNotFound
+}
+
+func (s *Service) ReconcileActive(
+	ctx context.Context,
+	limit int,
+) error {
+	posters, err := s.repository.ListActivePosters(
+		ctx,
+		limit,
+	)
+	if err != nil {
+		return err
+	}
+
+	var reconciliationErrors []error
+
+	for _, posterRecord := range posters {
+		if err := s.ReconcilePoster(
+			ctx,
+			posterRecord.ID,
+		); err != nil {
+			reconciliationErrors = append(
+				reconciliationErrors,
+				fmt.Errorf(
+					"reconcile poster %s: %w",
+					posterRecord.ID,
+					err,
+				),
+			)
+		}
+	}
+
+	return errors.Join(reconciliationErrors...)
+}
+
+func (s *Service) ReconcilePoster(
+	ctx context.Context,
+	posterID string,
+) error {
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
+
+	posterRecord, err := s.repository.GetPoster(
+		ctx,
+		posterID,
+	)
+	if err != nil {
+		return err
+	}
+
+	switch posterRecord.Status {
+	case domain.PosterStatusAwaitingSelection,
+		domain.PosterStatusSucceeded,
+		domain.PosterStatusFailed:
+		return nil
+
+	case domain.PosterStatusSelected,
+		domain.PosterStatusComposing:
+		return s.reconcileComposition(
+			ctx,
+			posterRecord,
+		)
+	}
+
+	var goal domain.GoalContract
+
+	if err := json.Unmarshal(
+		[]byte(posterRecord.GoalJSON),
+		&goal,
+	); err != nil {
+		return fmt.Errorf(
+			"decode poster goal contract: %w",
+			err,
+		)
+	}
+
+	candidates, err := s.repository.ListCandidates(
+		ctx,
+		posterID,
+	)
+	if err != nil {
+		return err
+	}
+
+	if len(candidates) == 0 {
+		if time.Since(posterRecord.CreatedAt) >
+			2*time.Minute {
+			return s.repository.UpdatePosterStatus(
+				ctx,
+				posterID,
+				domain.PosterStatusFailed,
+				"poster creation was interrupted before candidates were created",
+			)
+		}
+
+		return nil
+	}
+
+	for _, candidate := range candidates {
+		switch candidate.Status {
+		case domain.CandidateStatusReady,
+			domain.CandidateStatusFailed:
+			continue
+		}
+
+		job, err := s.core.Status(
+			ctx,
+			candidate.JobID,
+		)
+		if err != nil {
+			return err
+		}
+
+		switch job.Status {
+		case domain.JobStatusQueued,
+			domain.JobStatusRunning:
+			continue
+
+		case domain.JobStatusSucceeded:
+			output, err := s.repository.GetOutput(
+				ctx,
+				candidate.JobID,
+				"poster",
+			)
+			if err != nil {
+				return err
+			}
+
+			if err := s.evaluator.Evaluate(
+				output,
+				goal,
+			); err != nil {
+				if retryErr := s.retryCandidate(
+					ctx,
+					candidate,
+					goal,
+					err.Error(),
+				); retryErr != nil {
+					return retryErr
+				}
+
+				continue
+			}
+
+			if err := s.repository.UpdateCandidateState(
+				ctx,
+				candidate.ID,
+				domain.CandidateStatusReady,
+				true,
+				"",
+			); err != nil {
+				return err
+			}
+
+		case domain.JobStatusFailed,
+			domain.JobStatusCanceled:
+			if err := s.retryCandidate(
+				ctx,
+				candidate,
+				goal,
+				job.Error,
+			); err != nil {
+				return err
+			}
+		}
+	}
+
+	candidates, err = s.repository.ListCandidates(
+		ctx,
+		posterID,
+	)
+	if err != nil {
+		return err
+	}
+
+	readyCount := 0
+	failedCount := 0
+
+	for _, candidate := range candidates {
+		switch candidate.Status {
+		case domain.CandidateStatusReady:
+			readyCount++
+
+		case domain.CandidateStatusFailed:
+			failedCount++
+		}
+	}
+
+	switch {
+	case readyCount == len(candidates):
+		return s.repository.UpdatePosterStatus(
+			ctx,
+			posterID,
+			domain.PosterStatusAwaitingSelection,
+			"",
+		)
+
+	case readyCount+failedCount == len(candidates) &&
+		failedCount > 0:
+		return s.repository.UpdatePosterStatus(
+			ctx,
+			posterID,
+			domain.PosterStatusFailed,
+			"one or more candidates failed after all retry attempts",
+		)
+
+	default:
+		return s.repository.UpdatePosterStatus(
+			ctx,
+			posterID,
+			domain.PosterStatusGenerating,
+			"",
+		)
+	}
+}
+
+func (s *Service) retryCandidate(
+	ctx context.Context,
+	candidate domain.CandidateRecord,
+	goal domain.GoalContract,
+	reason string,
+) error {
+	if candidate.Attempt >= goal.MaxAttempts {
+		return s.repository.UpdateCandidateState(
+			ctx,
+			candidate.ID,
+			domain.CandidateStatusFailed,
+			false,
+			reason,
+		)
+	}
+
+	nextAttempt := candidate.Attempt + 1
+
+	nextSeed := candidate.Seed +
+		int64(nextAttempt*104729)
+
+	generation, err := s.core.Generate(
+		ctx,
+		domain.GenerateRequest{
+			Prompt: candidate.CompiledPrompt,
+			Seed:   &nextSeed,
+		},
+	)
+	if err != nil {
+		return s.repository.UpdateCandidateState(
+			ctx,
+			candidate.ID,
+			domain.CandidateStatusFailed,
+			false,
+			err.Error(),
+		)
+	}
+
+	return s.repository.ReplaceCandidateJob(
+		ctx,
+		candidate.ID,
+		generation.JobID,
+		nextSeed,
+		nextAttempt,
+	)
+}
+
+func marshalJSON(value any) (string, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return "", fmt.Errorf(
+			"marshal poster data: %w",
+			err,
+		)
+	}
+
+	return string(raw), nil
+}

@@ -1,9 +1,9 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"time"
-	"context"
 )
 
 func contextWithTimeout(
