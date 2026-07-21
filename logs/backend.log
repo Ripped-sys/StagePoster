@@ -1,0 +1,6 @@
+root@u-4603-29049fe9:/workspace/poster-engine# cat /workspace/poster-engine/logs/backend.log
+nohup: ignoring input
+2026/07/21 06:30:43 Poster backend listening on :8080
+2026/07/21 06:30:43 ComfyUI URL: http://127.0.0.1:8188
+2026/07/21 06:30:43 Workflow: /workspace/poster-engine/workflows/z_image_poster_v1.json
+2026/07/21 06:30:43 Bindings: {Prompt:0xc000190220 NegativePrompt:<nil> Seed:0xc000190260}

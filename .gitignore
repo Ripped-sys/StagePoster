@@ -6,6 +6,7 @@ models/
 
 # outputs
 outputs/
+results/
 *.png
 *.jpg
 *.jpeg
@@ -21,3 +22,5 @@ venv/
 
 # comfyui
 ComfyUI/
+backend.pid
+tunnel-go.pid
