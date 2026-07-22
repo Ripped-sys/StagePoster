@@ -248,3 +248,20 @@ DOWNLOAD_LORA=0 \
 SKIP_APT=1 \
 /workspace/poster-engine/scripts/bootstrap-server.sh
 ```
+
+
+## dev public url
+
+```bash
+cd /workspace/poster-engine
+
+mkdir -p logs run
+
+nohup cloudflared tunnel \
+  --no-autoupdate \
+  --url http://127.0.0.1:8080 \
+  > logs/cloudflared.log 2>&1 &
+
+echo $! > run/cloudflared.pid
+
+```
