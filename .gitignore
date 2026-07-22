@@ -43,3 +43,34 @@ backend/Accept:
 backend/dbcheck
 logs
 backend/logs
+
+# StagePoster runtime
+.env
+poster-backend
+backend.pid
+*.pid
+
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+logs/
+run/
+storage/
+
+# Python environments and models
+venv/
+.venv-vllm/
+models/
+
+# Local ComfyUI checkout
+ComfyUI/
+
+# Temporary and backup files
+*.before-*
+*.broken-backup
+*.tmp
+
+# Cloudflare local credentials
+.cloudflare/
+cloudflared/
