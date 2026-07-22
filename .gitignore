@@ -41,3 +41,5 @@ backend/Authorization:
 
 backend/Accept:
 backend/dbcheck
+logs
+backend/logs
