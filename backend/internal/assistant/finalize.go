@@ -7,7 +7,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Ripped-sys/StagePoster/backend/internal/domain"
@@ -21,19 +20,21 @@ var (
 		"AI session is not ready to finalize",
 	)
 
-	finalizeMu sync.Mutex
+	finalizeLocks keyedLock
 )
 
 func (s *Service) Finalize(
 	ctx context.Context,
 	sessionID string,
 ) (domain.AISessionResponse, error) {
-	finalizeMu.Lock()
-	defer finalizeMu.Unlock()
+	sessionID = strings.TrimSpace(sessionID)
+
+	unlock := finalizeLocks.Lock(sessionID)
+	defer unlock()
 
 	session, err := s.repository.GetAISession(
 		ctx,
-		strings.TrimSpace(sessionID),
+		sessionID,
 	)
 	if err != nil {
 		return domain.AISessionResponse{}, err
