@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -15,8 +16,10 @@ import (
 )
 
 var (
-	ErrInvalidPosterBrief = errors.New("invalid poster brief")
-	ErrCandidateNotReady  = errors.New("candidate is not ready")
+	ErrInvalidPosterBrief    = errors.New("invalid poster brief")
+	ErrCandidateNotReady     = errors.New("candidate is not ready")
+	ErrPosterNotSelectable   = errors.New("poster is not awaiting candidate selection")
+	ErrPosterSelectionLocked = errors.New("poster candidate selection is locked")
 )
 
 type Service struct {
@@ -27,6 +30,7 @@ type Service struct {
 	composer   CompositionEngine
 
 	reconcileMu sync.Mutex
+	selectMu    sync.Mutex
 }
 
 func NewService(
@@ -312,16 +316,118 @@ func (s *Service) Select(
 	posterID string,
 	candidateID string,
 ) (domain.PosterResponse, error) {
-	if strings.TrimSpace(candidateID) == "" {
+	posterID = strings.TrimSpace(posterID)
+	candidateID = strings.TrimSpace(candidateID)
+
+	if posterID == "" {
+		return domain.PosterResponse{},
+			repository.ErrNotFound
+	}
+
+	if candidateID == "" {
 		return domain.PosterResponse{},
 			ErrCandidateNotReady
 	}
+
+	// 将选择动作串行化，避免两个并发请求同时改变选中项，
+	// 或重复触发 Composer。
+	s.selectMu.Lock()
+	defer s.selectMu.Unlock()
 
 	if err := s.ReconcilePoster(
 		ctx,
 		posterID,
 	); err != nil {
 		return domain.PosterResponse{}, err
+	}
+
+	posterRecord, err := s.repository.GetPoster(
+		ctx,
+		posterID,
+	)
+	if err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	switch posterRecord.Status {
+	case domain.PosterStatusSucceeded:
+		// 完全相同的重复请求直接返回已有结果。
+		if posterRecord.SelectedCandidateID != candidateID {
+			return domain.PosterResponse{},
+				fmt.Errorf(
+					"%w: poster already completed with candidate %s",
+					ErrPosterSelectionLocked,
+					posterRecord.SelectedCandidateID,
+				)
+		}
+
+		for _, kind := range []string{
+			domain.PosterOutputKindFinal,
+			domain.PosterOutputKindThumbnail,
+		} {
+			output, outputErr :=
+				s.repository.GetPosterOutput(
+					ctx,
+					posterID,
+					kind,
+				)
+			if outputErr != nil {
+				if errors.Is(
+					outputErr,
+					repository.ErrNotFound,
+				) {
+					return domain.PosterResponse{},
+						fmt.Errorf(
+							"%w: missing %s output",
+							ErrResultNotReady,
+							kind,
+						)
+				}
+
+				return domain.PosterResponse{},
+					outputErr
+			}
+
+			if _, statErr := os.Stat(
+				output.StoragePath,
+			); statErr != nil {
+				return domain.PosterResponse{},
+					fmt.Errorf(
+						"%w: %s: %v",
+						ErrResultNotReady,
+						kind,
+						statErr,
+					)
+			}
+		}
+
+		return s.Get(ctx, posterID)
+
+	case domain.PosterStatusSelected,
+		domain.PosterStatusComposing:
+
+		// 正在合成时，重复提交同一 Candidate 属于幂等请求。
+		if posterRecord.SelectedCandidateID != candidateID {
+			return domain.PosterResponse{},
+				fmt.Errorf(
+					"%w: poster is composing candidate %s",
+					ErrPosterSelectionLocked,
+					posterRecord.SelectedCandidateID,
+				)
+		}
+
+		return s.Get(ctx, posterID)
+
+	case domain.PosterStatusAwaitingSelection:
+		// 合法的首次选择继续向下执行。
+
+	default:
+		return domain.PosterResponse{},
+			fmt.Errorf(
+				"%w: current status is %s",
+				ErrPosterNotSelectable,
+				posterRecord.Status,
+			)
 	}
 
 	if err := s.repository.SelectCandidate(

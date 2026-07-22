@@ -172,8 +172,12 @@ func (s *Service) Get(
 	}
 
 	return domain.AISessionResponse{
-		SessionID:      session.ID,
-		Status:         session.Status,
+		SessionID: session.ID,
+		Status:    session.Status,
+		AvailableActions: availableActionsForSession(
+			session.Status,
+			posterResult,
+		),
 		Brief:          session.Brief,
 		MissingFields:  missingBriefFields(session.Brief),
 		SelectedPlanID: session.SelectedPlanID,
@@ -619,6 +623,89 @@ func (s *Service) ConfirmPlan(
 	return s.Get(ctx, sessionID)
 }
 
+func (s *Service) SelectCandidate(
+	ctx context.Context,
+	sessionID string,
+	candidateID string,
+) (domain.AISessionResponse, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	candidateID = strings.TrimSpace(candidateID)
+
+	if sessionID == "" || candidateID == "" {
+		return domain.AISessionResponse{},
+			ErrInvalidSessionState
+	}
+
+	session, err := s.repository.GetAISession(
+		ctx,
+		sessionID,
+	)
+	if err != nil {
+		return domain.AISessionResponse{}, err
+	}
+
+	if session.PosterID == "" {
+		return domain.AISessionResponse{},
+			fmt.Errorf(
+				"%w: session has no poster",
+				ErrInvalidSessionState,
+			)
+	}
+
+	switch session.Status {
+	case domain.AISessionStatusAwaitingCandidateSelection,
+		domain.AISessionStatusLooping,
+		domain.AISessionStatusSucceeded:
+		// 允许首次选择、合成期间重试，以及成功后的幂等重试。
+
+	default:
+		if session.Status.Terminal() {
+			return domain.AISessionResponse{},
+				ErrSessionTerminal
+		}
+
+		return domain.AISessionResponse{},
+			fmt.Errorf(
+				"%w: cannot select candidate while session is %s",
+				ErrInvalidSessionState,
+				session.Status,
+			)
+	}
+
+	poster, err := s.posterFlow.Select(
+		ctx,
+		session.PosterID,
+		candidateID,
+	)
+	if err != nil {
+		return domain.AISessionResponse{}, err
+	}
+
+	nextStatus := sessionStatusForPoster(
+		poster.Status,
+	)
+	if nextStatus == "" {
+		return domain.AISessionResponse{},
+			fmt.Errorf(
+				"%w: unsupported poster status %s",
+				ErrInvalidSessionState,
+				poster.Status,
+			)
+	}
+
+	session.Status = nextStatus
+	session.ErrorMessage = poster.Error
+
+	if err := s.repository.UpdateAISession(
+		ctx,
+		session,
+	); err != nil {
+		return domain.AISessionResponse{}, err
+	}
+
+	return s.Get(ctx, sessionID)
+}
+
 func (s *Service) Cancel(
 	ctx context.Context,
 	sessionID string,
@@ -906,6 +993,70 @@ func combineMetrics(
 			right.TotalTokens,
 		Latency: left.Latency +
 			right.Latency,
+	}
+}
+
+func availableActionsForSession(
+	status domain.AISessionStatus,
+	poster *domain.PosterResponse,
+) []string {
+	switch status {
+	case domain.AISessionStatusCollectingBrief:
+		return []string{
+			"send_message",
+			"attach_asset",
+			"cancel",
+		}
+
+	case domain.AISessionStatusAwaitingPlanSelection:
+		return []string{
+			"send_message",
+			"confirm_plan",
+			"cancel",
+		}
+
+	case domain.AISessionStatusGeneratingCandidates:
+		return []string{
+			"refresh",
+			"cancel",
+		}
+
+	case domain.AISessionStatusAwaitingCandidateSelection:
+		return []string{
+			"select_candidate",
+			"cancel",
+		}
+
+	case domain.AISessionStatusLooping:
+		return []string{
+			"refresh",
+			"cancel",
+		}
+
+	case domain.AISessionStatusSucceeded:
+		actions := make([]string, 0, 2)
+
+		if poster != nil &&
+			poster.ResultURL != "" {
+			actions = append(
+				actions,
+				"download_final",
+			)
+		}
+
+		actions = append(
+			actions,
+			"review_poster",
+		)
+
+		return actions
+
+	case domain.AISessionStatusFailed,
+		domain.AISessionStatusCancelled:
+		return []string{}
+
+	default:
+		return []string{}
 	}
 }
 

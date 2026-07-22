@@ -9,14 +9,14 @@ type AIDesignRequest struct {
 }
 
 type AIMetricsResponse struct {
-	LatencyMS       int64 `json:"latencyMs"`
-	PromptTokens    int   `json:"promptTokens"`
-	CompletionTokens int  `json:"completionTokens"`
+	LatencyMS        int64 `json:"latencyMs"`
+	PromptTokens     int   `json:"promptTokens"`
+	CompletionTokens int   `json:"completionTokens"`
 }
 
 type AIDesignResponse struct {
 	Result  DesignAgentResult `json:"result"`
-	Metrics AIMetricsResponse  `json:"metrics"`
+	Metrics AIMetricsResponse `json:"metrics"`
 }
 
 type PosterReviewRequest struct {

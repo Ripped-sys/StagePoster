@@ -144,13 +144,14 @@ type BindAISessionAssetsRequest struct {
 }
 
 type AISessionResponse struct {
-	SessionID      string          `json:"sessionId"`
-	Status         AISessionStatus `json:"status"`
-	Brief          AISessionBrief  `json:"brief"`
-	MissingFields  []string        `json:"missingFields"`
-	SelectedPlanID string          `json:"selectedPlanId,omitempty"`
-	PosterID       string          `json:"posterId,omitempty"`
-	Error          string          `json:"error,omitempty"`
+	SessionID        string          `json:"sessionId"`
+	Status           AISessionStatus `json:"status"`
+	AvailableActions []string        `json:"availableActions,omitempty"`
+	Brief            AISessionBrief  `json:"brief"`
+	MissingFields    []string        `json:"missingFields"`
+	SelectedPlanID   string          `json:"selectedPlanId,omitempty"`
+	PosterID         string          `json:"posterId,omitempty"`
+	Error            string          `json:"error,omitempty"`
 
 	Messages []AIMessageRecord      `json:"messages"`
 	Assets   []AISessionAssetRecord `json:"assets"`

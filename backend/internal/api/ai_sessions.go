@@ -166,6 +166,18 @@ func (s *Server) handleAISessionRoute(
 			segments[2],
 		)
 
+	case len(segments) == 4 &&
+		segments[1] == "candidates" &&
+		segments[3] == "select" &&
+		request.Method == http.MethodPost:
+
+		s.handleSelectAICandidate(
+			writer,
+			request,
+			sessionID,
+			segments[2],
+		)
+
 	default:
 		writeError(
 			writer,
@@ -173,6 +185,66 @@ func (s *Server) handleAISessionRoute(
 			"AI session route not found",
 		)
 	}
+}
+
+func (s *Server) handleSelectAICandidate(
+	writer http.ResponseWriter,
+	request *http.Request,
+	sessionID string,
+	candidateID string,
+) {
+	ctx, cancel := contextWithTimeout(
+		request,
+		2*time.Minute,
+	)
+	defer cancel()
+
+	result, err :=
+		s.aiSessionService.SelectCandidate(
+			ctx,
+			sessionID,
+			candidateID,
+		)
+
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		writeError(
+			writer,
+			http.StatusNotFound,
+			"AI session, poster, or candidate not found",
+		)
+		return
+
+	case errors.Is(
+		err,
+		aisession.ErrInvalidSessionState,
+	),
+		errors.Is(
+			err,
+			aisession.ErrSessionTerminal,
+		):
+
+		writeError(
+			writer,
+			http.StatusConflict,
+			err.Error(),
+		)
+		return
+
+	case err != nil:
+		writeError(
+			writer,
+			http.StatusConflict,
+			err.Error(),
+		)
+		return
+	}
+
+	writeJSON(
+		writer,
+		http.StatusOK,
+		result,
+	)
 }
 
 func (s *Server) handleGetAISession(
