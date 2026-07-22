@@ -154,6 +154,16 @@ func (s *Server) handleAISessionRoute(
 			sessionID,
 		)
 
+	case len(segments) == 2 &&
+		segments[1] == "finalize" &&
+		request.Method == http.MethodPost:
+
+		s.handleFinalizeAISession(
+			writer,
+			request,
+			sessionID,
+		)
+
 	case len(segments) == 4 &&
 		segments[1] == "plans" &&
 		segments[3] == "confirm" &&
@@ -185,6 +195,66 @@ func (s *Server) handleAISessionRoute(
 			"AI session route not found",
 		)
 	}
+}
+
+func (s *Server) handleFinalizeAISession(
+	writer http.ResponseWriter,
+	request *http.Request,
+	sessionID string,
+) {
+	ctx, cancel := contextWithTimeout(
+		request,
+		12*time.Minute,
+	)
+	defer cancel()
+
+	result, err := s.aiSessionService.Finalize(
+		ctx,
+		sessionID,
+	)
+
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		writeError(
+			writer,
+			http.StatusNotFound,
+			"AI session, poster, or design plan not found",
+		)
+		return
+
+	case errors.Is(
+		err,
+		aisession.ErrFinalizeNotReady,
+	),
+		errors.Is(
+			err,
+			aisession.ErrInvalidSessionState,
+		),
+		errors.Is(
+			err,
+			aisession.ErrSessionTerminal,
+		):
+		writeError(
+			writer,
+			http.StatusConflict,
+			err.Error(),
+		)
+		return
+
+	case err != nil:
+		writeError(
+			writer,
+			http.StatusBadGateway,
+			err.Error(),
+		)
+		return
+	}
+
+	writeJSON(
+		writer,
+		http.StatusOK,
+		result,
+	)
 }
 
 func (s *Server) handleSelectAICandidate(

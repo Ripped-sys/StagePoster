@@ -15,6 +15,13 @@ type CompositionAsset struct {
 	Height      int
 }
 
+type CompositionAdjustments struct {
+	Template         string
+	TitleOffsetRatio float64
+	PanelTopRatio    float64
+	PanelTheme       string
+}
+
 type ComposeInput struct {
 	PosterID    string
 	CandidateID string
@@ -24,7 +31,8 @@ type ComposeInput struct {
 
 	KeyVisualPath string
 
-	Event EventBrief
+	Event       EventBrief
+	Adjustments CompositionAdjustments
 
 	ArtistLogo CompositionAsset
 	EventLogo  CompositionAsset

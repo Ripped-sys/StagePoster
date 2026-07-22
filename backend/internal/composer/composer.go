@@ -166,18 +166,25 @@ func (c *Composer) Compose(
 
 	c.drawTopOverlay(canvas)
 
+	adjustments := normalizeCompositionAdjustments(
+		input.Adjustments,
+	)
+
 	panelTop := int(
-		float64(input.Height) * 0.77,
+		float64(input.Height) *
+			adjustments.PanelTopRatio,
 	)
 
 	drawInformationBackground(
 		canvas,
 		panelTop,
+		adjustments.PanelTheme,
 	)
 
 	if err := c.drawTitle(
 		canvas,
 		input.Event.Title,
+		adjustments.TitleOffsetRatio,
 	); err != nil {
 		return domain.ComposeResult{}, err
 	}
@@ -202,6 +209,7 @@ func (c *Composer) Compose(
 		canvas,
 		input.Event,
 		panelTop,
+		adjustments.PanelTheme,
 	); err != nil {
 		return domain.ComposeResult{}, err
 	}
@@ -299,6 +307,141 @@ func (c *Composer) Compose(
 	}, nil
 }
 
+func normalizeCompositionAdjustments(
+	adjustments domain.CompositionAdjustments,
+) domain.CompositionAdjustments {
+	switch strings.ToLower(
+		strings.TrimSpace(adjustments.Template),
+	) {
+	case "editorial_top":
+		if adjustments.TitleOffsetRatio == 0 {
+			adjustments.TitleOffsetRatio = 0.035
+		}
+
+		if adjustments.PanelTopRatio == 0 {
+			adjustments.PanelTopRatio = 0.80
+		}
+
+	case "cinematic_center":
+		if adjustments.TitleOffsetRatio == 0 {
+			adjustments.TitleOffsetRatio = 0.055
+		}
+
+		if adjustments.PanelTopRatio == 0 {
+			adjustments.PanelTopRatio = 0.81
+		}
+
+		if strings.TrimSpace(
+			adjustments.PanelTheme,
+		) == "" {
+			adjustments.PanelTheme = "dark"
+		}
+
+	case "gothic_frame":
+		if adjustments.TitleOffsetRatio == 0 {
+			adjustments.TitleOffsetRatio = 0.045
+		}
+
+		if adjustments.PanelTopRatio == 0 {
+			adjustments.PanelTopRatio = 0.82
+		}
+
+		if strings.TrimSpace(
+			adjustments.PanelTheme,
+		) == "" {
+			adjustments.PanelTheme = "dark"
+		}
+	}
+
+	if adjustments.PanelTopRatio == 0 {
+		adjustments.PanelTopRatio = 0.77
+	}
+
+	if adjustments.PanelTopRatio < 0.70 {
+		adjustments.PanelTopRatio = 0.70
+	}
+
+	if adjustments.PanelTopRatio > 0.86 {
+		adjustments.PanelTopRatio = 0.86
+	}
+
+	if adjustments.TitleOffsetRatio < 0 {
+		adjustments.TitleOffsetRatio = 0
+	}
+
+	if adjustments.TitleOffsetRatio > 0.12 {
+		adjustments.TitleOffsetRatio = 0.12
+	}
+
+	switch strings.ToLower(
+		strings.TrimSpace(adjustments.PanelTheme),
+	) {
+	case "dark":
+		adjustments.PanelTheme = "dark"
+
+	default:
+		adjustments.PanelTheme = "light"
+	}
+
+	return adjustments
+}
+
+func informationPanelColors(
+	theme string,
+) (
+	panel color.NRGBA,
+	accent color.NRGBA,
+	value color.NRGBA,
+	label color.NRGBA,
+) {
+	accent = color.NRGBA{
+		R: 139,
+		G: 23,
+		B: 30,
+		A: 255,
+	}
+
+	if strings.EqualFold(
+		strings.TrimSpace(theme),
+		"dark",
+	) {
+		return color.NRGBA{
+				R: 14,
+				G: 14,
+				B: 15,
+				A: 255,
+			},
+			accent,
+			color.NRGBA{
+				R: 242,
+				G: 237,
+				B: 222,
+				A: 255,
+			},
+			color.NRGBA{
+				R: 211,
+				G: 74,
+				B: 80,
+				A: 255,
+			}
+	}
+
+	return color.NRGBA{
+			R: 236,
+			G: 231,
+			B: 216,
+			A: 255,
+		},
+		accent,
+		color.NRGBA{
+			R: 19,
+			G: 19,
+			B: 18,
+			A: 255,
+		},
+		accent
+}
+
 func validateComposeInput(
 	input domain.ComposeInput,
 ) error {
@@ -344,20 +487,10 @@ func validateComposeInput(
 func drawInformationBackground(
 	canvas *image.NRGBA,
 	panelTop int,
+	theme string,
 ) {
-	panelColor := color.NRGBA{
-		R: 236,
-		G: 231,
-		B: 216,
-		A: 255,
-	}
-
-	accentColor := color.NRGBA{
-		R: 139,
-		G: 23,
-		B: 30,
-		A: 255,
-	}
+	panelColor, accentColor, _, _ :=
+		informationPanelColors(theme)
 
 	stdDraw.Draw(
 		canvas,
@@ -429,6 +562,7 @@ func (c *Composer) drawTopOverlay(
 func (c *Composer) drawTitle(
 	canvas *image.NRGBA,
 	title string,
+	offsetRatio float64,
 ) error {
 	title = strings.TrimSpace(title)
 
@@ -468,6 +602,10 @@ func (c *Composer) drawTitle(
 	totalHeight := lineHeight * len(lines)
 
 	startY := 48 +
+		int(
+			float64(canvas.Bounds().Dy())*
+				offsetRatio,
+		) +
 		(maxHeight-totalHeight)/2 +
 		face.Metrics().
 			Ascent.
@@ -581,6 +719,7 @@ func (c *Composer) drawInformationPanel(
 	canvas *image.NRGBA,
 	event domain.EventBrief,
 	panelTop int,
+	theme string,
 ) error {
 	labelFace, err := newFace(
 		c.regular,
@@ -600,19 +739,8 @@ func (c *Composer) drawInformationPanel(
 	}
 	defer closeFace(valueFace)
 
-	dark := color.NRGBA{
-		R: 19,
-		G: 19,
-		B: 18,
-		A: 255,
-	}
-
-	red := color.NRGBA{
-		R: 139,
-		G: 23,
-		B: 30,
-		A: 255,
-	}
+	_, _, dark, red :=
+		informationPanelColors(theme)
 
 	leftX := 66
 	centerX := canvas.Bounds().Dx() / 2

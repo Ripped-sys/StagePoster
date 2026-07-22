@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Ripped-sys/StagePoster/backend/internal/domain"
@@ -31,6 +32,20 @@ type ComposedFile struct {
 func (s *Service) reconcileComposition(
 	ctx context.Context,
 	posterRecord domain.PosterRecord,
+) error {
+	return s.composePoster(
+		ctx,
+		posterRecord,
+		domain.CompositionAdjustments{},
+		"",
+	)
+}
+
+func (s *Service) composePoster(
+	ctx context.Context,
+	posterRecord domain.PosterRecord,
+	adjustments domain.CompositionAdjustments,
+	keyVisualOverride string,
 ) error {
 	candidate, err := s.repository.GetSelectedCandidate(
 		ctx,
@@ -67,20 +82,29 @@ func (s *Service) reconcileComposition(
 		}
 	}
 
-	keyVisual, err := s.repository.GetOutput(
-		ctx,
-		candidate.JobID,
-		"poster",
+	keyVisualPath := strings.TrimSpace(
+		keyVisualOverride,
 	)
-	if err != nil {
-		return s.failComposition(
-			ctx,
-			posterRecord.ID,
-			fmt.Errorf(
-				"resolve candidate output: %w",
-				err,
-			),
-		)
+
+	if keyVisualPath == "" {
+		keyVisual, outputErr :=
+			s.repository.GetOutput(
+				ctx,
+				candidate.JobID,
+				"poster",
+			)
+		if outputErr != nil {
+			return s.failComposition(
+				ctx,
+				posterRecord.ID,
+				fmt.Errorf(
+					"resolve candidate output: %w",
+					outputErr,
+				),
+			)
+		}
+
+		keyVisualPath = keyVisual.StoragePath
 	}
 
 	var event domain.EventBrief
@@ -176,8 +200,9 @@ func (s *Service) reconcileComposition(
 			CandidateID:   candidate.ID,
 			Width:         1024,
 			Height:        1536,
-			KeyVisualPath: keyVisual.StoragePath,
+			KeyVisualPath: keyVisualPath,
 			Event:         event,
+			Adjustments:   adjustments,
 			ArtistLogo:    artistLogo,
 			EventLogo:     eventLogo,
 			Sponsors:      sponsors,

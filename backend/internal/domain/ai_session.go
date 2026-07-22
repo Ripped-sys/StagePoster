@@ -11,6 +11,7 @@ const (
 	AISessionStatusAwaitingCandidateSelection AISessionStatus = "awaiting_candidate_selection"
 	AISessionStatusLooping                    AISessionStatus = "looping"
 	AISessionStatusNeedsUserInput             AISessionStatus = "needs_user_input"
+	AISessionStatusCompletedWithWarnings      AISessionStatus = "completed_with_warnings"
 	AISessionStatusSucceeded                  AISessionStatus = "succeeded"
 	AISessionStatusFailed                     AISessionStatus = "failed"
 	AISessionStatusCancelled                  AISessionStatus = "cancelled"
@@ -19,6 +20,7 @@ const (
 func (status AISessionStatus) Terminal() bool {
 	switch status {
 	case AISessionStatusSucceeded,
+		AISessionStatusCompletedWithWarnings,
 		AISessionStatusFailed,
 		AISessionStatusCancelled:
 		return true
@@ -143,15 +145,26 @@ type BindAISessionAssetsRequest struct {
 	Assets []BindAISessionAsset `json:"assets"`
 }
 
+type AIReviewSummary struct {
+	Finalized      bool           `json:"finalized"`
+	Accepted       bool           `json:"accepted"`
+	Rounds         int            `json:"rounds"`
+	BestRound      int            `json:"bestRound,omitempty"`
+	BestScore      Score          `json:"bestScore,omitempty"`
+	LatestDecision ReviewDecision `json:"latestDecision,omitempty"`
+	Warning        string         `json:"warning,omitempty"`
+}
+
 type AISessionResponse struct {
-	SessionID        string          `json:"sessionId"`
-	Status           AISessionStatus `json:"status"`
-	AvailableActions []string        `json:"availableActions,omitempty"`
-	Brief            AISessionBrief  `json:"brief"`
-	MissingFields    []string        `json:"missingFields"`
-	SelectedPlanID   string          `json:"selectedPlanId,omitempty"`
-	PosterID         string          `json:"posterId,omitempty"`
-	Error            string          `json:"error,omitempty"`
+	SessionID        string           `json:"sessionId"`
+	Status           AISessionStatus  `json:"status"`
+	AvailableActions []string         `json:"availableActions,omitempty"`
+	Brief            AISessionBrief   `json:"brief"`
+	MissingFields    []string         `json:"missingFields"`
+	SelectedPlanID   string           `json:"selectedPlanId,omitempty"`
+	PosterID         string           `json:"posterId,omitempty"`
+	Error            string           `json:"error,omitempty"`
+	ReviewSummary    *AIReviewSummary `json:"reviewSummary,omitempty"`
 
 	Messages []AIMessageRecord      `json:"messages"`
 	Assets   []AISessionAssetRecord `json:"assets"`

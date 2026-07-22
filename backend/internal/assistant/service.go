@@ -111,7 +111,11 @@ func (s *Service) Get(
 			posterResult = &poster
 
 			if session.Status !=
-				domain.AISessionStatusCancelled {
+				domain.AISessionStatusCancelled &&
+				session.Status !=
+					domain.AISessionStatusCompletedWithWarnings &&
+				session.Status !=
+					domain.AISessionStatusNeedsUserInput {
 				nextStatus := sessionStatusForPoster(
 					poster.Status,
 				)
@@ -171,18 +175,40 @@ func (s *Service) Get(
 		return domain.AISessionResponse{}, err
 	}
 
+	var reviewSummary *domain.AIReviewSummary
+
+	if session.PosterID != "" {
+		reviews, reviewErr :=
+			s.posterFlow.ListReviews(
+				ctx,
+				session.PosterID,
+				100,
+			)
+		if reviewErr != nil {
+			return domain.AISessionResponse{},
+				reviewErr
+		}
+
+		reviewSummary = buildReviewSummary(
+			reviews,
+			session.Status,
+		)
+	}
+
 	return domain.AISessionResponse{
 		SessionID: session.ID,
 		Status:    session.Status,
 		AvailableActions: availableActionsForSession(
 			session.Status,
 			posterResult,
+			reviewSummary,
 		),
 		Brief:          session.Brief,
 		MissingFields:  missingBriefFields(session.Brief),
 		SelectedPlanID: session.SelectedPlanID,
 		PosterID:       session.PosterID,
 		Error:          session.ErrorMessage,
+		ReviewSummary:  reviewSummary,
 		Messages:       messages,
 		Assets:         assets,
 		Plans:          plans,
@@ -999,6 +1025,7 @@ func combineMetrics(
 func availableActionsForSession(
 	status domain.AISessionStatus,
 	poster *domain.PosterResponse,
+	reviewSummary *domain.AIReviewSummary,
 ) []string {
 	switch status {
 	case domain.AISessionStatusCollectingBrief:
@@ -1033,8 +1060,22 @@ func availableActionsForSession(
 			"cancel",
 		}
 
+	case domain.AISessionStatusNeedsUserInput:
+		return []string{
+			"send_message",
+			"cancel",
+		}
+
 	case domain.AISessionStatusSucceeded:
 		actions := make([]string, 0, 2)
+
+		if reviewSummary == nil ||
+			!reviewSummary.Finalized {
+			actions = append(
+				actions,
+				"finalize",
+			)
+		}
 
 		if poster != nil &&
 			poster.ResultURL != "" {
@@ -1044,12 +1085,17 @@ func availableActionsForSession(
 			)
 		}
 
-		actions = append(
-			actions,
-			"review_poster",
-		)
-
 		return actions
+
+	case domain.AISessionStatusCompletedWithWarnings:
+		if poster != nil &&
+			poster.ResultURL != "" {
+			return []string{
+				"download_final",
+			}
+		}
+
+		return []string{}
 
 	case domain.AISessionStatusFailed,
 		domain.AISessionStatusCancelled:
