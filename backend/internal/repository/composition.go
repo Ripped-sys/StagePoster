@@ -200,7 +200,6 @@ func (r *Repository) UpsertPosterOutput(
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(poster_id, kind)
 		DO UPDATE SET
-			id = excluded.id,
 			candidate_id = excluded.candidate_id,
 			filename = excluded.filename,
 			mime_type = excluded.mime_type,
