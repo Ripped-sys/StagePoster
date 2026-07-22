@@ -66,6 +66,45 @@ func (s *PosterService) Health(ctx context.Context) error {
 	return nil
 }
 
+func (s *PosterService) ReleaseComfyMemory(
+	ctx context.Context,
+) error {
+	const maxAttempts = 2
+
+	var lastErr error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if err := s.client.FreeMemory(ctx); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+
+		if attempt == maxAttempts {
+			break
+		}
+
+		timer := time.NewTimer(2 * time.Second)
+
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+
+			return ctx.Err()
+
+		case <-timer.C:
+		}
+	}
+
+	return fmt.Errorf(
+		"release ComfyUI memory after %d attempts: %w",
+		maxAttempts,
+		lastErr,
+	)
+}
+
 func (s *PosterService) Bindings() comfy.Bindings {
 	return s.template.Bindings()
 }

@@ -13,9 +13,10 @@ import (
 )
 
 type Runtime struct {
-	client    *Client
-	autoSleep bool
-	mu        sync.Mutex
+	client        *Client
+	autoSleep     bool
+	beforeAcquire func(context.Context) error
+	mu            sync.Mutex
 }
 
 func NewRuntime(
@@ -28,10 +29,30 @@ func NewRuntime(
 	}
 }
 
+func (runtime *Runtime) SetBeforeAcquire(
+	hook func(context.Context) error,
+) {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+
+	runtime.beforeAcquire = hook
+}
+
 func (runtime *Runtime) Acquire(
 	ctx context.Context,
 ) (func(), error) {
 	runtime.mu.Lock()
+
+	if runtime.beforeAcquire != nil {
+		if err := runtime.beforeAcquire(ctx); err != nil {
+			runtime.mu.Unlock()
+
+			return nil, fmt.Errorf(
+				"prepare GPU before waking VLM: %w",
+				err,
+			)
+		}
+	}
 
 	if err := runtime.client.EnsureAwake(ctx); err != nil {
 		runtime.mu.Unlock()

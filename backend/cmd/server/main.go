@@ -171,6 +171,11 @@ func main() {
 	// VLM URL 和模型名称，避免出现半配置状态。
 	aiConfig := api.NewAIConfigFromEnv()
 
+	// Qwen 唤醒前先卸载 ComfyUI 模型，避免单卡显存争用。
+	aiConfig.Runtime.SetBeforeAcquire(
+		posterService.ReleaseComfyMemory,
+	)
+
 	aiSessionService := assistant.NewService(
 		repositoryInstance,
 		aiConfig.Service,

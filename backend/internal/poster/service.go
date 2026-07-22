@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -663,12 +664,39 @@ func (s *Service) ReconcilePoster(
 
 	switch {
 	case readyCount == len(candidates):
-		return s.repository.UpdatePosterStatus(
+		if err := s.repository.UpdatePosterStatus(
 			ctx,
 			posterID,
 			domain.PosterStatusAwaitingSelection,
 			"",
-		)
+		); err != nil {
+			return err
+		}
+
+		// Candidate 文件已经持久化到本地。
+		// 释放 ComfyUI 失败不能破坏成功的业务结果。
+		releaseContext, cancel :=
+			context.WithTimeout(
+				context.Background(),
+				45*time.Second,
+			)
+
+		releaseErr :=
+			s.core.ReleaseComfyMemory(
+				releaseContext,
+			)
+
+		cancel()
+
+		if releaseErr != nil {
+			log.Printf(
+				"poster %s candidates ready, but ComfyUI memory release failed: %v",
+				posterID,
+				releaseErr,
+			)
+		}
+
+		return nil
 
 	case readyCount+failedCount == len(candidates) &&
 		failedCount > 0:

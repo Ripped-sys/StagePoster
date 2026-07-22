@@ -76,6 +76,75 @@ func (c *Client) Health(ctx context.Context) error {
 	return nil
 }
 
+func (c *Client) FreeMemory(
+	ctx context.Context,
+) error {
+	payload, err := json.Marshal(
+		map[string]bool{
+			"unload_models": true,
+			"free_memory":   true,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"marshal ComfyUI free request: %w",
+			err,
+		)
+	}
+
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		c.baseURL+"/free",
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"create ComfyUI free request: %w",
+			err,
+		)
+	}
+
+	request.Header.Set(
+		"Content-Type",
+		"application/json",
+	)
+
+	response, err := c.http.Do(request)
+	if err != nil {
+		return fmt.Errorf(
+			"request ComfyUI memory release: %w",
+			err,
+		)
+	}
+	defer response.Body.Close()
+
+	body, readErr := io.ReadAll(
+		io.LimitReader(
+			response.Body,
+			64*1024,
+		),
+	)
+	if readErr != nil {
+		return fmt.Errorf(
+			"read ComfyUI memory release response: %w",
+			readErr,
+		)
+	}
+
+	if response.StatusCode < 200 ||
+		response.StatusCode >= 300 {
+
+		return fmt.Errorf(
+			"ComfyUI /free returned HTTP %d: %s",
+			response.StatusCode,
+			strings.TrimSpace(string(body)),
+		)
+	}
+
+	return nil
+}
+
 func (c *Client) Submit(
 	ctx context.Context,
 	workflow map[string]any,
