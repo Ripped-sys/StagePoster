@@ -1,0 +1,168 @@
+nohup: ignoring input
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /workspace/poster-engine/.venv-vllm/lib/python3.12/site-packages/aiter/jit/module_aiter_core.so
+(APIServer pid=298334) INFO 07-22 03:23:29 [api_utils.py:339] 
+(APIServer pid=298334) INFO 07-22 03:23:29 [api_utils.py:339]        █     █     █▄   ▄█
+(APIServer pid=298334) INFO 07-22 03:23:29 [api_utils.py:339]  ▄▄ ▄█ █     █     █ ▀▄▀ █  version 0.25.1
+(APIServer pid=298334) INFO 07-22 03:23:29 [api_utils.py:339]   █▄█▀ █     █     █     █  model   /workspace/poster-engine/models/Qwen3.5-9B
+(APIServer pid=298334) INFO 07-22 03:23:29 [api_utils.py:339]    ▀▀  ▀▀▀▀▀ ▀▀▀▀▀ ▀     ▀
+(APIServer pid=298334) INFO 07-22 03:23:29 [api_utils.py:339] 
+(APIServer pid=298334) INFO 07-22 03:23:29 [api_utils.py:273] non-default args: {'model_tag': '/workspace/poster-engine/models/Qwen3.5-9B', 'default_chat_template_kwargs': {'enable_thinking': False}, 'host': '127.0.0.1', 'port': 8001, 'api_key': ['stageposter-vlm-local'], 'model': '/workspace/poster-engine/models/Qwen3.5-9B', 'dtype': 'float16', 'max_model_len': 4096, 'enforce_eager': True, 'served_model_name': ['stageposter-vlm'], 'generation_config': 'vllm', 'enable_sleep_mode': True, 'gpu_memory_utilization': 0.65, 'limit_mm_per_prompt': {'image': {'count': 1, 'width': 768, 'height': 1152}, 'video': 0}, 'max_num_batched_tokens': 4096, 'max_num_seqs': 1}
+(APIServer pid=298334) INFO 07-22 03:23:29 [model.py:545] Enabling cumem allocator because sleep mode requires it.
+(APIServer pid=298334) INFO 07-22 03:23:29 [model.py:619] Resolved architecture: Qwen3_5ForConditionalGeneration
+(APIServer pid=298334) WARNING 07-22 03:23:29 [model.py:2114] Casting torch.bfloat16 to torch.float16.
+(APIServer pid=298334) INFO 07-22 03:23:29 [model.py:1776] Using max model len 4096
+(APIServer pid=298334) INFO 07-22 03:23:29 [scheduler.py:252] Chunked prefill is enabled with max_num_batched_tokens=4096.
+(APIServer pid=298334) INFO 07-22 03:23:29 [vllm.py:1042] Asynchronous scheduling is enabled.
+(APIServer pid=298334) WARNING 07-22 03:23:29 [vllm.py:1096] Enforce eager set, disabling torch.compile and CUDAGraphs. This is equivalent to setting -cc.mode=none -cc.cudagraph_mode=none
+(APIServer pid=298334) WARNING 07-22 03:23:29 [vllm.py:1144] Inductor compilation was disabled by user settings, optimizations settings that are only active during inductor compilation will be ignored.
+(APIServer pid=298334) INFO 07-22 03:23:29 [kernel.py:292] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['vllm_c', 'native'], fused_add_rms_norm=['vllm_c', 'native'])
+(APIServer pid=298334) INFO 07-22 03:23:29 [vllm.py:1322] Cudagraph is disabled under eager mode
+(APIServer pid=298334) INFO 07-22 03:23:29 [compilation.py:312] Enabled custom fusions: norm_quant, act_quant
+(APIServer pid=298334) [transformers] The `use_fast` parameter is deprecated and will be removed in a future version. Use `backend="torchvision"` instead of `use_fast=True`, or `backend="pil"` instead of `use_fast=False`.
+(EngineCore pid=298990) [aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+(EngineCore pid=298990) [aiter] import [module_aiter_core] under /workspace/poster-engine/.venv-vllm/lib/python3.12/site-packages/aiter/jit/module_aiter_core.so
+(EngineCore pid=298990) INFO 07-22 03:23:46 [core.py:114] Initializing a V1 LLM engine (v0.25.1) with config: model='/workspace/poster-engine/models/Qwen3.5-9B', speculative_config=None, tokenizer='/workspace/poster-engine/models/Qwen3.5-9B', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=False, dtype=torch.float16, max_seq_len=4096, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=True, quantization=None, quantization_config=None, enforce_eager=True, enable_return_routed_experts=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False, jit_monitor_mode='warn', jit_monitor_verbose=False), seed=0, served_model_name=stageposter-vlm, enable_prefix_caching=False, enable_chunked_prefill=True, pooler_config=None, compilation_config={'mode': <CompilationMode.NONE: 0>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['+sparse_attn_indexer', 'all'], 'ir_enable_torch_wrap': False, 'splitting_ops': [], 'compile_mm_encoder': False, 'cudagraph_mm_encoder': False, 'encoder_cudagraph_token_budgets': [], 'encoder_cudagraph_max_vision_items_per_batch': 0, 'encoder_cudagraph_max_frames_per_batch': None, 'compile_sizes': [], 'compile_ranges_endpoints': [4096], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'size_asserts': False, 'alignment_asserts': False, 'scalar_asserts': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.NONE: 0>, 'cudagraph_num_of_warmups': 0, 'cudagraph_capture_sizes': [], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': True, 'fuse_act_quant': True, 'fuse_attn_quant': False, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_rope_kvcache_cat_mla': False, 'fuse_act_padding': False}, 'max_cudagraph_capture_size': 0, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': False, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['vllm_c', 'native'], fused_add_rms_norm=['vllm_c', 'native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, moe_backend='auto', linear_backend='auto')
+(EngineCore pid=298990) INFO 07-22 03:23:47 [parallel_state.py:1607] world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://10.244.200.5:52661 backend=nccl
+(EngineCore pid=298990) INFO 07-22 03:23:47 [parallel_state.py:1942] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, EP rank N/A, EPLB rank N/A
+(EngineCore pid=298990) [transformers] The `use_fast` parameter is deprecated and will be removed in a future version. Use `backend="torchvision"` instead of `use_fast=True`, or `backend="pil"` instead of `use_fast=False`.
+(EngineCore pid=298990) INFO 07-22 03:23:52 [gpu_model_runner.py:5209] Starting to load model /workspace/poster-engine/models/Qwen3.5-9B...
+(EngineCore pid=298990) INFO 07-22 03:23:52 [rocm.py:397] Set FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE to enable Flash Attention Triton backend on RDNA.
+(EngineCore pid=298990) INFO 07-22 03:23:52 [rocm.py:669] Using Torch SDPA backend for ViT model.
+(EngineCore pid=298990) WARNING 07-22 03:23:52 [activation.py:783] [ROCm] PyTorch's native GELU with tanh approximation is unstable. Falling back to GELU(approximate='none').
+(EngineCore pid=298990) INFO 07-22 03:23:52 [mm_encoder_attention.py:373] Using AttentionBackendEnum.TORCH_SDPA for MMEncoderAttention.
+(EngineCore pid=298990) INFO 07-22 03:23:52 [qwen_gdn_linear_attn.py:228] Using Triton/FLA GDN prefill kernel (requested=auto, head_k_dim=128).
+(EngineCore pid=298990) INFO 07-22 03:23:52 [rocm.py:601] Found incompatible backend(s) [TURBOQUANT] with AttentionType.DECODER. Overriding with ROCM_ATTN out of potential backends: ['ROCM_ATTN', 'TRITON_ATTN'].
+(EngineCore pid=298990) WARNING 07-22 03:23:52 [compilation.py:1304] Op 'sparse_attn_indexer' not present in model, enabling with '+sparse_attn_indexer' has no effect
+(EngineCore pid=298990) INFO 07-22 03:23:52 [weight_utils.py:849] Filesystem type for checkpoints: EXT4. Checkpoint size: 17.98 GiB. Available RAM: 473.38 GiB.
+(EngineCore pid=298990) INFO 07-22 03:23:52 [weight_utils.py:872] Auto-prefetch is disabled because the filesystem (EXT4) is not a recognized network FS (NFS/Lustre). If you want to force prefetching, start vLLM with --safetensors-load-strategy=prefetch.
+(EngineCore pid=298990) Loading safetensors checkpoint shards:   0% Completed | 0/4 [00:00<?, ?it/s]
+(EngineCore pid=298990) Loading safetensors checkpoint shards:  25% Completed | 1/4 [00:01<00:03,  1.33s/it]
+(EngineCore pid=298990) Loading safetensors checkpoint shards:  50% Completed | 2/4 [00:03<00:03,  1.74s/it]
+(EngineCore pid=298990) Loading safetensors checkpoint shards:  75% Completed | 3/4 [00:05<00:01,  1.89s/it]
+(EngineCore pid=298990) Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:06<00:00,  1.66s/it]
+(EngineCore pid=298990) Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:06<00:00,  1.69s/it]
+(EngineCore pid=298990) 
+(EngineCore pid=298990) INFO 07-22 03:23:59 [default_loader.py:430] Loading weights took 6.84 seconds
+(EngineCore pid=298990) INFO 07-22 03:24:00 [gpu_model_runner.py:5306] Model loading took 17.66 GiB memory and 7.124883 seconds
+(EngineCore pid=298990) INFO 07-22 03:24:00 [interface.py:890] Setting attention block size to 528 tokens to ensure that attention page size is >= mamba page size.
+(EngineCore pid=298990) INFO 07-22 03:24:00 [interface.py:914] Padding mamba page size by 0.76% to ensure that mamba page size and attention page size are exactly equal.
+(EngineCore pid=298990) INFO 07-22 03:24:00 [gpu_model_runner.py:6322] Encoder cache will be initialized with a budget of 16384 tokens, and profiled with 1 image items of the maximum feature size.
+(EngineCore pid=298990) INFO 07-22 03:24:03 [gpu_worker.py:538] Available KV cache memory: 12.61 GiB
+(EngineCore pid=298990) INFO 07-22 03:24:03 [kv_cache_utils.py:2146] GPU KV cache size: 291,188 tokens
+(EngineCore pid=298990) INFO 07-22 03:24:03 [kv_cache_utils.py:2147] Maximum concurrency for 4,096 tokens per request: 71.09x
+(EngineCore pid=298990) INFO 07-22 03:24:03 [qwen_triton_warmup.py:372] Warming up Qwen Triton kernels for model_type=qwen3_5_text.
+(EngineCore pid=298990) INFO 07-22 03:24:04 [cutedsl_warmup.py:92] Skipping CuTeDSL warmup on non-CUDA platform.
+(EngineCore pid=298990) INFO 07-22 03:24:04 [jit_monitor.py:73] Kernel JIT monitor activated; monitored JIT compilations during inference will use mode=warn.
+(EngineCore pid=298990) INFO 07-22 03:24:04 [core.py:344] init engine (profile, create kv cache, warmup model) took 4.01 s
+(EngineCore pid=298990) INFO 07-22 03:24:04 [vllm.py:1042] Asynchronous scheduling is enabled.
+(EngineCore pid=298990) WARNING 07-22 03:24:04 [vllm.py:1096] Enforce eager set, disabling torch.compile and CUDAGraphs. This is equivalent to setting -cc.mode=none -cc.cudagraph_mode=none
+(EngineCore pid=298990) WARNING 07-22 03:24:04 [vllm.py:1144] Inductor compilation was disabled by user settings, optimizations settings that are only active during inductor compilation will be ignored.
+(EngineCore pid=298990) INFO 07-22 03:24:04 [kernel.py:292] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['vllm_c', 'native'], fused_add_rms_norm=['vllm_c', 'native'])
+(EngineCore pid=298990) INFO 07-22 03:24:04 [vllm.py:1322] Cudagraph is disabled under eager mode
+(EngineCore pid=298990) INFO 07-22 03:24:04 [compilation.py:312] Enabled custom fusions: norm_quant, act_quant
+(APIServer pid=298334) INFO 07-22 03:24:04 [api_server.py:612] Supported tasks: ['generate']
+(APIServer pid=298334) WARNING 07-22 03:24:04 [__init__.py:36] SECURITY WARNING: Development endpoints are enabled! This should NOT be used in production!
+(APIServer pid=298334) INFO 07-22 03:24:05 [hf.py:548] Detected the chat template content format to be 'openai'. You can set `--chat-template-content-format` to override this.
+(APIServer pid=298334) INFO 07-22 03:24:18 [base.py:236] Multi-modal warmup completed in 13.144s
+(APIServer pid=298334) INFO 07-22 03:24:18 [base.py:236] Readonly multi-modal warmup completed in 0.013s
+(APIServer pid=298334) INFO 07-22 03:24:18 [api_server.py:616] Starting vLLM server on http://127.0.0.1:8001
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:37] Available routes are:
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /openapi.json, Methods: GET, HEAD
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /docs, Methods: GET, HEAD
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /docs/oauth2-redirect, Methods: GET, HEAD
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /redoc, Methods: GET, HEAD
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /load, Methods: GET
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /version, Methods: GET
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /health, Methods: GET
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /metrics, Methods: GET
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /tokenize, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /detokenize, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /v1/models, Methods: GET
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /ping, Methods: GET
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /ping, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /invocations, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /reset_prefix_cache, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /reset_mm_cache, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /reset_encoder_cache, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /pause, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /resume, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /is_paused, Methods: GET
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /init_weight_transfer_engine, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /start_weight_update, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /update_weights, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /finish_weight_update, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /get_world_size, Methods: GET
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /collective_rpc, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /server_info, Methods: GET
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /sleep, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /wake_up, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /is_sleeping, Methods: GET
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /v1/chat/completions, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /v1/chat/completions/batch, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /v1/responses, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /v1/responses/{response_id}, Methods: GET
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /v1/responses/{response_id}/cancel, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /v1/completions, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /v1/messages, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /v1/messages/count_tokens, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /generative_scoring, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /scale_elastic_ep, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /is_scaling_elastic_ep, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /v1/chat/completions/render, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /v1/completions/render, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /v1/chat/completions/derender, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /v1/completions/derender, Methods: POST
+(APIServer pid=298334) INFO 07-22 03:24:18 [launcher.py:46] Route: /inference/v1/generate, Methods: POST
+(APIServer pid=298334) INFO:     Started server process [298334]
+(APIServer pid=298334) INFO:     Waiting for application startup.
+(APIServer pid=298334) INFO:     Application startup complete.
+(EngineCore pid=298990) WARNING 07-22 03:24:30 [jit_monitor.py:129] Triton kernel JIT compilation during inference: _fwd_kernel. This causes a latency spike; consider extending warmup to cover this shape/config.
+(EngineCore pid=298990) WARNING 07-22 03:24:30 [chunked_prefill_paged_decode.py:419] Cannot use ROCm custom paged attention kernel, falling back to Triton implementation.
+(EngineCore pid=298990) WARNING 07-22 03:24:30 [jit_monitor.py:129] Triton kernel JIT compilation during inference: kernel_paged_attention_2d. This causes a latency spike; consider extending warmup to cover this shape/config.
+(EngineCore pid=298990) WARNING 07-22 03:24:31 [jit_monitor.py:129] Triton kernel JIT compilation during inference: _causal_conv1d_update_kernel. This causes a latency spike; consider extending warmup to cover this shape/config.
+(EngineCore pid=298990) WARNING 07-22 03:24:31 [jit_monitor.py:129] Triton kernel JIT compilation during inference: fused_recurrent_gated_delta_rule_packed_decode_kernel. This causes a latency spike; consider extending warmup to cover this shape/config.
+(APIServer pid=298334) INFO:     127.0.0.1:52450 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+(EngineCore pid=298990) INFO 07-22 03:24:35 [block_pool.py:685] Successfully reset prefix cache
+(EngineCore pid=298990) INFO 07-22 03:24:35 [sleep_mode_backend.py:184] Using sleep-mode backend: cumem
+(APIServer pid=298334) INFO 07-22 03:24:38 [loggers.py:273] Engine 000: Avg prompt throughput: 1.6 tokens/s, Avg generation throughput: 0.3 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%
+(EngineCore pid=298990) INFO 07-22 03:24:41 [cumem.py:271] CuMemAllocator: sleep freed 30.29 GiB memory in total, of which 17.68 GiB is backed up in CPU and the rest 12.61 GiB is discarded directly.
+(EngineCore pid=298990) INFO 07-22 03:24:41 [gpu_worker.py:211] Sleep mode freed 30.32 GiB memory, 0.64 GiB memory is still in use.
+(EngineCore pid=298990) INFO 07-22 03:24:41 [abstract.py:327] It took 5.787180 seconds to fall asleep.
+(APIServer pid=298334) INFO:     127.0.0.1:52454 - "POST /sleep?level=1 HTTP/1.1" 200 OK
+(APIServer pid=298334) INFO 07-22 03:24:48 [loggers.py:273] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%
+(APIServer pid=298334) INFO:     127.0.0.1:51202 - "GET /is_sleeping HTTP/1.1" 200 OK
+(APIServer pid=298334) INFO 07-22 03:24:54 [api_router.py:38] wake up the engine with tags: None
+(EngineCore pid=298990) INFO 07-22 03:24:55 [abstract.py:345] It took 0.723649 seconds to wake up tags {'weights', 'kv_cache'}.
+(APIServer pid=298334) INFO:     127.0.0.1:51206 - "POST /wake_up HTTP/1.1" 200 OK
+(APIServer pid=298334) INFO:     127.0.0.1:50030 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+(APIServer pid=298334) INFO 07-22 03:25:08 [loggers.py:273] Engine 000: Avg prompt throughput: 1.6 tokens/s, Avg generation throughput: 0.3 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%
+(APIServer pid=298334) INFO 07-22 03:25:18 [loggers.py:273] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%
+(EngineCore pid=298990) INFO 07-22 03:26:58 [block_pool.py:685] Successfully reset prefix cache
+(EngineCore pid=298990) INFO 07-22 03:26:59 [cumem.py:271] CuMemAllocator: sleep freed 30.29 GiB memory in total, of which 17.68 GiB is backed up in CPU and the rest 12.61 GiB is discarded directly.
+(EngineCore pid=298990) INFO 07-22 03:26:59 [gpu_worker.py:211] Sleep mode freed 30.31 GiB memory, 0.64 GiB memory is still in use.
+(EngineCore pid=298990) INFO 07-22 03:26:59 [abstract.py:327] It took 0.981064 seconds to fall asleep.
+(APIServer pid=298334) INFO:     127.0.0.1:44944 - "POST /sleep?level=1 HTTP/1.1" 200 OK
+(APIServer pid=298334) INFO:     127.0.0.1:60500 - "GET /is_sleeping HTTP/1.1" 200 OK
+(APIServer pid=298334) INFO:     127.0.0.1:49316 - "GET /v1/models HTTP/1.1" 200 OK
+(APIServer pid=298334) INFO:     127.0.0.1:49318 - "GET /is_sleeping HTTP/1.1" 200 OK
+(APIServer pid=298334) INFO:     127.0.0.1:53182 - "GET /is_sleeping HTTP/1.1" 200 OK
+(APIServer pid=298334) INFO 07-22 03:28:01 [api_router.py:38] wake up the engine with tags: None
+(EngineCore pid=298990) INFO 07-22 03:28:02 [abstract.py:345] It took 0.724164 seconds to wake up tags {'weights', 'kv_cache'}.
+(APIServer pid=298334) INFO:     127.0.0.1:53182 - "POST /wake_up HTTP/1.1" 200 OK
+(EngineCore pid=298990) WARNING 07-22 03:28:02 [jit_monitor.py:129] Triton kernel JIT compilation during inference: _triton_mrope_forward. This causes a latency spike; consider extending warmup to cover this shape/config.
+(APIServer pid=298334) INFO 07-22 03:28:08 [loggers.py:273] Engine 000: Avg prompt throughput: 43.9 tokens/s, Avg generation throughput: 23.0 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.6%, Prefix cache hit rate: 0.0%
+(APIServer pid=298334) INFO:     127.0.0.1:53182 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+(APIServer pid=298334) INFO 07-22 03:28:18 [loggers.py:273] Engine 000: Avg prompt throughput: 56.5 tokens/s, Avg generation throughput: 33.4 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.6%, Prefix cache hit rate: 0.0%
+(APIServer pid=298334) INFO 07-22 03:28:28 [loggers.py:273] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 32.5 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.8%, Prefix cache hit rate: 0.0%
+(APIServer pid=298334) INFO:     127.0.0.1:53182 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+(EngineCore pid=298990) INFO 07-22 03:28:38 [core.py:795] Waiting for in-flight requests to complete before sleeping...
+(EngineCore pid=298990) INFO 07-22 03:28:38 [block_pool.py:685] Successfully reset prefix cache
+(APIServer pid=298334) INFO 07-22 03:28:38 [loggers.py:273] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 29.1 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%
+(EngineCore pid=298990) INFO 07-22 03:28:39 [cumem.py:271] CuMemAllocator: sleep freed 30.29 GiB memory in total, of which 17.68 GiB is backed up in CPU and the rest 12.61 GiB is discarded directly.
+(EngineCore pid=298990) INFO 07-22 03:28:39 [gpu_worker.py:211] Sleep mode freed 30.42 GiB memory, 0.65 GiB memory is still in use.
+(EngineCore pid=298990) INFO 07-22 03:28:39 [abstract.py:327] It took 0.979140 seconds to fall asleep.
+(APIServer pid=298334) INFO:     127.0.0.1:53182 - "POST /sleep?level=1 HTTP/1.1" 200 OK
+(APIServer pid=298334) INFO:     127.0.0.1:49184 - "GET /is_sleeping HTTP/1.1" 200 OK
+(APIServer pid=298334) INFO 07-22 03:28:48 [loggers.py:273] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%
+(APIServer pid=298334) INFO:     127.0.0.1:47754 - "GET /is_sleeping HTTP/1.1" 200 OK

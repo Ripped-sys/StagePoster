@@ -123,7 +123,7 @@ func (client *Client) IsSleeping(
 
 	if err := json.Unmarshal(body, &object); err == nil {
 		return object.IsSleeping ||
-			object.Sleeping,
+				object.Sleeping,
 			nil
 	}
 
@@ -231,4 +231,32 @@ func (client *Client) controlRequest(
 	}
 
 	return response, nil
+}
+
+func (runtime *Runtime) Suspend(
+	ctx context.Context,
+) error {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+
+	sleeping, err := runtime.client.IsSleeping(ctx)
+	if err != nil {
+		return fmt.Errorf(
+			"read VLM sleep state: %w",
+			err,
+		)
+	}
+
+	if sleeping {
+		return nil
+	}
+
+	if err := runtime.client.Sleep(ctx); err != nil {
+		return fmt.Errorf(
+			"sleep VLM runtime: %w",
+			err,
+		)
+	}
+
+	return nil
 }

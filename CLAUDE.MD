@@ -44,3 +44,48 @@ API 接入层
    ↓
 外部推理适配层
 ```
+
+backend struct 
+
+Frontend AI Mode
+        │
+        ▼
+AI Session API
+        │
+        ▼
+Design Agent
+Qwen3.5-9B
+        │
+        ▼
+PosterGoal + DesignPlan
+        │
+用户确认设计方案
+        │
+        ▼
+Poster Service
+        │
+        ▼
+GPU Coordinator
+   ┌────┴─────┐
+   │          │
+Qwen Sleep  ComfyUI Generate
+              │
+          3 Candidates
+              │
+          用户选择
+              │
+          Composer
+              │
+          Final Poster
+              │
+   ComfyUI /free
+              │
+         Qwen Wake
+              │
+       Visual Critic
+              │
+              ▼
+ ACCEPT / RECOMPOSE / REGENERATE
+              │
+              ▼
+       Goal-Driven Loop

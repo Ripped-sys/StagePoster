@@ -60,7 +60,30 @@ Result Storage
 
 
 # backend run command (dev)
+```bash
+export VLM_URL=http://127.0.0.1:8001
+export VLM_API_KEY=stageposter-vlm-local
+export VLM_MODEL=stageposter-vlm
+export VLM_REQUEST_TIMEOUT=5m
+export VLM_AUTO_SLEEP=true
 
+export COMFY_URL=http://127.0.0.1:8188
+
+mkdir -p logs
+
+pkill -f '/workspace/poster-engine/backend/poster-backend' \
+  2>/dev/null || true
+
+nohup ./poster-backend \
+  > logs/backend.log 2>&1 &
+
+echo $! > backend.pid
+
+sleep 2
+
+tail -80 logs/backend.log
+
+```
 
 ```bash
 if [ -f /workspace/poster-engine/backend.pid ]; then
@@ -121,4 +144,107 @@ Decision Router
 保留最佳结果
        ↓
 用户最终选择
+```
+
+## llm model qwen/qwen-9b
+
+## install vllm rocm
+
+```
+uv pip install \
+  --upgrade \
+  vllm \
+  --extra-index-url https://wheels.vllm.ai/rocm/
+```
+
+
+```bash
+cd /workspace/poster-engine
+
+source .venv-vlm/bin/activate
+
+python -m pip install -U uv
+
+PYTHON_BIN="$(
+  command -v python3.12 ||
+  command -v python3
+)"
+
+uv venv .venv-vllm \
+  --python "$PYTHON_BIN"
+
+deactivate
+
+source .venv-vllm/bin/activate
+
+```
+
+## 启动告诉多模态服务
+```bash
+cd /workspace/poster-engine
+
+mkdir -p logs/vllm
+
+pkill -f 'vllm serve.*Qwen3.5-9B' 2>/dev/null || true
+
+nohup env \
+  VLLM_SERVER_DEV_MODE=1 \
+  VLLM_ROCM_SLEEP_MEM_CHUNK_SIZE=128 \
+  /workspace/poster-engine/.venv-vllm/bin/vllm serve \
+  /workspace/poster-engine/models/Qwen3.5-9B \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --served-model-name stageposter-vlm \
+  --api-key stageposter-vlm-local \
+  --dtype float16 \
+  --max-model-len 4096 \
+  --max-num-seqs 1 \
+  --max-num-batched-tokens 4096 \
+  --gpu-memory-utilization 0.90 \
+  --limit-mm-per-prompt '{"image":{"count":1,"width":768,"height":1152},"video":0}' \
+  --enforce-eager \
+  --enable-sleep-mode \
+  --default-chat-template-kwargs '{"enable_thinking":false}' \
+  --generation-config vllm \
+  > logs/vllm/server.log 2>&1 &
+
+echo $! > vlm.pid
+
+echo "vLLM PID: $(cat vlm.pid)"
+```
+
+check run log 
+```
+tail -f /workspace/poster-engine/logs/vllm/server.log
+```
+
+moiot oom
+```bash
+watch -n 1 \
+  rocm-smi \
+  --showmeminfo vram \
+  --showuse
+```
+## setup scripts
+重新安装 apt 系统工具
+重新创建 /usr/local/bin/go 等链接
+重新写入 shell 环境
+检查 Python runtime
+检查 venv
+检查模型 SHA256
+复用全部 /workspace 内容
+跳过已完成的大文件下载
+```bash
+chmod +x /workspace/poster-engine/scripts/bootstrap-server.sh
+
+本次只想恢复系统，不下载模型
+
+DOWNLOAD_MODELS=0 \
+/workspace/poster-engine/scripts/bootstrap-server.sh
+不想下载 LoRA：
+DOWNLOAD_LORA=0 \
+/workspace/poster-engine/scripts/bootstrap-server.sh
+跳过 apt：
+SKIP_APT=1 \
+/workspace/poster-engine/scripts/bootstrap-server.sh
 ```

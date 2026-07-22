@@ -1,10 +1,53 @@
 nohup: ignoring input
-2026/07/21 10:51:34 Poster backend listening on :8080
-2026/07/21 10:51:34 ComfyUI URL: http://127.0.0.1:8188
-2026/07/21 10:51:34 Workflow: /workspace/poster-engine/workflows/poster-keyvisual-v1.json
-2026/07/21 10:51:34 Workflow identity: poster-keyvisual@1.0.0
-2026/07/21 10:51:34 Database: /workspace/poster-engine/backend/data/poster.db
-2026/07/21 10:51:34 Storage: /workspace/poster-engine/backend/storage/jobs
-2026/07/21 10:51:34 Asset storage: /workspace/poster-engine/backend/storage/assets
-2026/07/21 10:51:34 Poster outputs: /workspace/poster-engine/backend/storage/posters
-2026/07/21 10:51:34 Bindings: {Prompt:0xc00009ac20 NegativePrompt:<nil> Seed:0xc00009ac60}
+SHELL=/bin/bash
+COLORTERM=truecolor
+VLM_URL=http://127.0.0.1:8001
+TERM_PROGRAM_VERSION=1.129.1
+COPILOT_DEBUG_NONCE=88782bb210b4cb87592a558e9fd44664
+PLAN_ID=blood-ivory-crown
+VLM_AUTO_SLEEP=true
+ASSET_ID=asset_f73e8612-8ef7-4d52-9ffd-181c71747d53
+COMFY_URL=http://127.0.0.1:8188
+PWD=/workspace/poster-engine/backend
+VLM_MODEL=stageposter-vlm
+LOGNAME=root
+SESSION_ID=session_4017675d-a55e-41fa-8289-29cdf139fa5a
+VSCODE_GIT_ASKPASS_NODE=/root/.vscode-server/cli/servers/Stable-8a7abeba6e03ea3af87bfbce9a1b7e48fed567b8/server/node
+HOME=/root
+LANG=C.UTF-8
+LS_COLORS=rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=00:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.avif=01;35:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:*~=00;90:*#=00;90:*.bak=00;90:*.crdownload=00;90:*.dpkg-dist=00;90:*.dpkg-new=00;90:*.dpkg-old=00;90:*.dpkg-tmp=00;90:*.old=00;90:*.orig=00;90:*.part=00;90:*.rej=00;90:*.rpmnew=00;90:*.rpmorig=00;90:*.rpmsave=00;90:*.swp=00;90:*.tmp=00;90:*.ucf-dist=00;90:*.ucf-new=00;90:*.ucf-old=00;90:
+VIRTUAL_ENV=/workspace/poster-engine/venv
+GIT_ASKPASS=/root/.vscode-server/cli/servers/Stable-8a7abeba6e03ea3af87bfbce9a1b7e48fed567b8/server/extensions/git/dist/askpass.sh
+SSH_CONNECTION=10.5.10.94 22166 10.244.200.5 22
+REVIEW_IMAGE=/workspace/poster-engine/backend/storage/posters/poster_f1c89075-ddf7-4a64-8265-15c4e5857bf6/final-poster.png
+VSCODE_GIT_ASKPASS_EXTRA_ARGS=
+VSCODE_PYTHON_AUTOACTIVATE_GUARD=1
+VLM_REQUEST_TIMEOUT=5m
+LESSCLOSE=/usr/bin/lesspipe %s %s
+TERM=xterm-256color
+VLM_API_KEY=stageposter-vlm-local
+LESSOPEN=| /usr/bin/lesspipe %s
+USER=root
+VSCODE_GIT_IPC_HANDLE=/tmp/vscode-git-a55e329101.sock
+SHLVL=1
+VIRTUAL_ENV_PROMPT=(venv) 
+PS1=\[]633;A\](venv) \[]633;A\]\[\e]0;\u@\h: \w\a\]${debian_chroot:+($debian_chroot)}\u@\h:\w\$ \[]633;B\]\[]633;B\]
+SSH_CLIENT=10.5.10.94 22166 22
+VSCODE_GIT_ASKPASS_MAIN=/root/.vscode-server/cli/servers/Stable-8a7abeba6e03ea3af87bfbce9a1b7e48fed567b8/server/extensions/git/dist/askpass-main.js
+HF_ENDPOINT=https://hf-mirror.com
+BROWSER=/root/.vscode-server/cli/servers/Stable-8a7abeba6e03ea3af87bfbce9a1b7e48fed567b8/server/bin/helpers/browser.sh
+PATH=/workspace/poster-engine/venv/bin:/usr/local/go/bin:/root/.opencode/bin:/root/.vscode-server/data/User/globalStorage/github.copilot-chat/debugCommand:/root/.vscode-server/data/User/globalStorage/github.copilot-chat/copilotCli:/root/.vscode-server/cli/servers/Stable-8a7abeba6e03ea3af87bfbce9a1b7e48fed567b8/server/bin/remote-cli:/root/.opencode/bin:/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+DB_FILE=data/poster.db
+OLDPWD=/workspace/poster-engine
+TERM_PROGRAM=vscode
+VSCODE_IPC_HOOK_CLI=/tmp/vscode-ipc-0e1585db-99d2-46fe-95a5-b3b8434cb6c3.sock
+_=/usr/bin/nohup
+LISTEN_ADDR=:8080
+WORKFLOW_PATH=/workspace/poster-engine/workflows/z_image_poster_v1.json
+PROMPT_NODE_ID=57:27
+SEED_NODE_ID=57:3
+DB_PATH=/workspace/poster-engine/backend/data/poster.db
+STORAGE_ROOT=/workspace/poster-engine/backend/storage/jobs
+WORKFLOW_KEY=poster-text
+WORKFLOW_VERSION=1.0.0
+RECONCILE_INTERVAL=2s

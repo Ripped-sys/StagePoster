@@ -75,10 +75,14 @@ func OpenSQLite(
 		_ = db.Close()
 		return nil, err
 	}
- if err := repository.MigrateReviews(ctx); err != nil {
-	_ = db.Close()
-	return nil, err
-}
+	if err := repository.MigrateReviews(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := repository.MigrateAISessions(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return repository, nil
 }
 
