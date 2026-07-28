@@ -71,6 +71,10 @@ ComfyUI/
 *.broken-backup
 *.tmp
 
+
+backend/data/poster.db-wal
+backend/data/poster.db-wal
+backend/poster-backend
 # Cloudflare local credentials
 .cloudflare/
 cloudflared/
