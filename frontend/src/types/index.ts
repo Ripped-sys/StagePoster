@@ -1,0 +1,9 @@
+export type SceneType='concert'|'festival'|'lecture'|'competition'|'commercial'|'custom';
+export interface UploadedAsset{id:string;name:string;type:string;dataUrl:string;category:'person'|'venue'|'logo'|'qr'|'reference';status:'success'|'error';error?:string}
+export interface Participant{id:string;name:string;genre:string;logo?:UploadedAsset;groupPhoto?:UploadedAsset;keyPhoto?:UploadedAsset}
+export interface StylePreset{id:string;name:string;colors:string[];composition:string;tagline:string}
+export interface OutputOptions{poster:boolean;teaser:boolean;vj:boolean}
+export interface PosterProject{id:string;scene?:SceneType;title:string;theme:string;dateTime:string;city:string;venue:string;subject:string;price:string;ticketInfo:string;bands:Participant[];speakerName:string;speakerBio:string;organizer:string;assets:Partial<Record<'venue'|'qr'|'reference'|'speaker'|'organizerLogo',UploadedAsset>>;styleId:string;outputs:OutputOptions;visualSeed:number;createdAt:string}
+export type GenerationStatus='waiting'|'running'|'done';
+export interface GenerationMetrics{gpu:string;rocm:string;resolution:string;duration:string;peakVram:string}
+export interface GenerationTask{id:string;projectId:string;step:number;progress:number;status:'running'|'complete'|'failed';startedAt:number;metrics:GenerationMetrics;outputUrl?:string;error?:string;source?:'w7900'|'local'}
