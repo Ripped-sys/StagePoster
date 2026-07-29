@@ -34,12 +34,12 @@ COMFY_VENV="${COMFY_VENV:-$ROOT/venv}"
 VLLM_VENV="${VLLM_VENV:-$ROOT/.venv-vllm}"
 
 mkdir -p \
-  "$BACKEND_ROOT/logs" \
-  "$BACKEND_ROOT/run" \
-  "$BACKEND_ROOT/data" \
-  "$BACKEND_ROOT/storage/jobs" \
-  "$BACKEND_ROOT/storage/assets" \
-  "$BACKEND_ROOT/storage/posters"
+  /workspace/persistence/stageposter/data \
+  /workspace/persistence/stageposter/storage/jobs \
+  /workspace/persistence/stageposter/storage/assets \
+  /workspace/persistence/stageposter/storage/posters \
+  /workspace/persistence/stageposter/logs \
+  /workspace/persistence/stageposter/run
 
 pid_alive() {
   local file="$1"
