@@ -32,7 +32,7 @@ Final Poster + Thumbnail + Review Evidence
 | ComfyUI | Ready | `http://127.0.0.1:8188` |
 | Qwen3.5-9B / vLLM | Ready | `http://127.0.0.1:8001` |
 | StagePoster Go Backend | Ready | `http://127.0.0.1:8080` |
-| SQLite | Ready | `backend/data/poster.db` |
+| SQLite | Ready | `/workspace/persistence/stageposter/data/poster.db` |
 | Cloudflare Quick Tunnel | Dev | `https://<random>.trycloudflare.com` |
 | Full Poster Pipeline | Passed | 3 candidates → select → compose → review → final |
 | Smoke Test | Passed | `scripts/smoke-test.sh` |
@@ -168,17 +168,24 @@ This prevents both models from occupying VRAM simultaneously.
 │   └── ...
 ├── backend/
 │   ├── cmd/server/main.go           # Entry point
-│   ├── data/                        # SQLite database
-│   ├── logs/                        # Service logs
-│   ├── run/                         # PID files + tunnel URL
-│   ├── storage/
-│   │   ├── jobs/                    # ComfyUI task outputs
-│   │   ├── assets/                  # Uploaded assets
-│   │   └── posters/                 # Final poster outputs
+│   ├── data/.gitkeep                # SQLite directory (data on NFS)
+│   ├── logs/.gitkeep                # Log directory (logs on NFS)
+│   ├── run/.gitkeep                 # PID directory (PID files on NFS)
+│   ├── storage/.gitkeep             # Storage directory (data on NFS)
 │   ├── internal/                    # Go packages
 │   └── poster-backend               # Compiled binary
 └── docs/                            # Documentation
 ```
+
+**Persistent data** lives on NFS at `/workspace/persistence/stageposter/`:
+- `data/` → SQLite database
+- `storage/jobs/` → ComfyUI task outputs
+- `storage/assets/` → Uploaded assets
+- `storage/posters/` → Final poster outputs
+- `logs/` → Service logs
+- `run/` → PID files and tunnel URLs
+
+This ensures data survives instance termination.
 
 ---
 
@@ -228,11 +235,14 @@ Runtime identity: `poster-text@1.0.0`
 |---|---|---|
 | `LISTEN_ADDR` | `:8080` | Backend listen address |
 | `COMFY_URL` | `http://127.0.0.1:8188` | ComfyUI URL |
+| `COMFY_VENV` | `/workspace/venv` | ComfyUI Python venv |
 | `VLM_URL` | `http://127.0.0.1:8001` | vLLM URL |
 | `VLM_API_KEY` | `stageposter-vlm-local` | vLLM API key |
 | `VLM_MODEL` | `stageposter-vlm` | vLLM model name |
-| `DB_PATH` | `backend/data/poster.db` | SQLite path |
-| `STORAGE_ROOT` | `backend/storage/jobs` | Task output dir |
+| `DB_PATH` | `/workspace/persistence/stageposter/data/poster.db` | SQLite path (NFS) |
+| `STORAGE_ROOT` | `/workspace/persistence/stageposter/storage/jobs` | Task output dir (NFS) |
+| `ASSET_STORAGE_ROOT` | `/workspace/persistence/stageposter/storage/assets` | Asset storage dir (NFS) |
+| `POSTER_OUTPUT_ROOT` | `/workspace/persistence/stageposter/storage/posters` | Poster output dir (NFS) |
 | `WORKFLOW_PATH` | `workflows/z_image_poster_v1.json` | ComfyUI workflow |
 | `WORKFLOW_KEY` | `poster-text` | Workflow identifier |
 | `WORKFLOW_VERSION` | `1.0.0` | Workflow version |
@@ -425,11 +435,11 @@ const dependencies = await response.json();
 # Check
 curl -fsS http://127.0.0.1:8080/api/system/dependencies | python3 -m json.tool
 
-# Logs
-tail -f logs/backend.log
-tail -f logs/comfyui.log
-tail -f logs/vllm.log
-tail -f logs/cloudflared.log
+# Logs (on NFS)
+tail -f /workspace/persistence/stageposter/logs/backend.log
+tail -f /workspace/persistence/stageposter/logs/comfyui.log
+tail -f /workspace/persistence/stageposter/logs/vllm.log
+tail -f /workspace/persistence/stageposter/logs/cloudflared.log
 
 # Stop tunnel only
 kill "$(cat run/cloudflared.pid)" 2>/dev/null || true
