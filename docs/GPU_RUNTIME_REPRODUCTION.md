@@ -1,55 +1,51 @@
----
+# StagePoster Single-GPU Inference — Reproduction Guide
 
-# StagePoster 单 GPU 推理服务启动与复现指南
+## Goal
 
-## 1. 文档目标
+Reproduce the core StagePoster pipeline on a single AMD GPU server:
 
-本文档用于在单张 AMD GPU 服务器上复现 StagePoster 的核心链路：
-
-```text
-创建 AI Session
-→ Qwen 理解用户 Brief
-→ 生成三套 Design Plan
-→ 确认 Plan
-→ Z-Image Turbo 生成三张 Candidate
-→ 返回候选图 URL
+```
+Create AI Session
+  → Qwen understands user Brief
+  → Generate 3 Design Plans
+  → Confirm Plan
+  → Z-Image Turbo generates 3 Candidates
+  → Return candidate image URLs
 ```
 
-当前验证环境采用一张约 48GB 显存的 AMD GPU，同时运行：
-
+Verified environment: single AMD GPU with ~48 GB VRAM, running:
 - StagePoster Go Backend
 - vLLM + Qwen3.5-9B
 - ComfyUI + Z-Image Turbo
 
-由于 Qwen 和 Z-Image 无法稳定同时常驻显存，系统采用 GPU 显存接力机制：
+Because Qwen and Z-Image cannot stably coexist in VRAM simultaneously, the
+system uses a GPU memory relay mechanism:
 
-```text
-Qwen 阶段
-→ Backend 调用 vLLM /wake_up
-→ Brief / Plan / Review
-→ Backend 调用 vLLM /sleep?level=1
-→ Qwen 显存释放
+```
+Qwen phase
+  → Backend calls vLLM /wake_up
+  → Brief / Plan / Review
+  → Backend calls vLLM /sleep?level=1
+  → Qwen VRAM released
 
-ComfyUI 阶段
-→ 加载 Z-Image
-→ 生成 Candidates
-→ POST /free
-→ 卸载模型并释放显存
+ComfyUI phase
+  → Load Z-Image
+  → Generate Candidates
+  → POST /free
+  → Unload models and release VRAM
 ```
 
 ---
 
-# 2. 已验证环境
-
-本次测试成功环境：
+## 1. Verified Environment
 
 ```text
 OS: Ubuntu Linux
-GPU: AMD Radeon GPU，约 48GB VRAM
-ROCm: 7.2 系列
-Python for ComfyUI: 3.10.20
-Python for vLLM: 3.12 virtual environment
-vLLM: 0.25.1
+GPU: AMD Radeon GPU, ~48 GB VRAM
+ROCm: 7.2 series
+Python (ComfyUI): 3.10.20
+Python (vLLM): 3.12 virtual environment
+vLLM: 0.20.0
 ComfyUI: 0.28.0
 Go: 1.25.0
 Backend port: 8080
@@ -57,11 +53,10 @@ ComfyUI port: 8188
 vLLM port: 8001
 ```
 
-模型：
+Models:
 
 ```text
-Qwen:
-  /workspace/poster-engine/models/Qwen3.5-9B
+Qwen: /workspace/poster-engine/models/Qwen3.5-9B
 
 Z-Image Turbo:
   z_image_turbo_bf16.safetensors
@@ -69,17 +64,19 @@ Z-Image Turbo:
   ae.safetensors
 ```
 
-项目根目录：
+**Important:** All persistent content should be placed under `/workspace`.
+Do not use `/models`, `/root`, or other temporary mount directories that may
+be cleared on instance restart.
+
+Project root:
 
 ```text
 /workspace/poster-engine
 ```
 
-建议所有需要持久化的内容全部放在 `/workspace`，不要放在实例重启后可能清空的 `/models`、`/root` 或其他临时挂载目录。
-
 ---
 
-# 3. 推荐目录结构
+## 2. Recommended Directory Structure
 
 ```text
 /workspace/poster-engine/
@@ -88,7 +85,6 @@ Z-Image Turbo:
 │   ├── data/
 │   ├── storage/
 │   └── logs/
-│
 ├── ComfyUI/
 │   ├── main.py
 │   └── models/
@@ -96,7 +92,6 @@ Z-Image Turbo:
 │       ├── text_encoders/
 │       ├── vae/
 │       └── loras/
-│
 ├── models/
 │   ├── Qwen3.5-9B/
 │   └── poster/
@@ -104,17 +99,12 @@ Z-Image Turbo:
 │       ├── text_encoders/
 │       ├── vae/
 │       └── loras/
-│
 ├── workflows/
 │   └── z_image_poster_v1.json
-│
 ├── logs/
 │   ├── backend.log
-│   ├── comfyui/
-│   │   └── server.log
-│   └── vllm/
-│       └── server.log
-│
+│   ├── comfyui/server.log
+│   └── vllm/server.log
 ├── venv/
 ├── .venv-vllm/
 ├── backend.pid
@@ -124,15 +114,15 @@ Z-Image Turbo:
 
 ---
 
-# 4. 核心端口
+## 3. Core Ports
 
-| 服务 | 地址 | 用途 |
+| Service | Address | Purpose |
 |---|---|---|
 | Backend | `127.0.0.1:8080` | StagePoster API |
-| ComfyUI | `127.0.0.1:8188` | Z-Image 推理 |
-| vLLM | `127.0.0.1:8001` | Qwen 推理 |
+| ComfyUI | `127.0.0.1:8188` | Z-Image inference |
+| vLLM | `127.0.0.1:8001` | Qwen inference |
 
-检查监听：
+Check listeners:
 
 ```bash
 lsof -iTCP:8080 -sTCP:LISTEN
@@ -140,7 +130,7 @@ lsof -iTCP:8188 -sTCP:LISTEN
 lsof -iTCP:8001 -sTCP:LISTEN
 ```
 
-服务器安装了 `iproute2` 后也可以：
+Or with `iproute2`:
 
 ```bash
 ss -ltnp | grep -E ':8080|:8188|:8001'
@@ -148,35 +138,26 @@ ss -ltnp | grep -E ':8080|:8188|:8001'
 
 ---
 
-# 5. 启动 vLLM
+## 4. Starting vLLM
 
-## 5.1 稳定参数
+### 4.1 Stable Parameters
 
-本次验证中，以下参数可以稳定完成：
+Verified parameters for stable sleep → wake → inference cycle:
 
 ```text
-sleep
-→ wake_up
-→ 推理
-→ sleep
-```
-
-关键参数：
-
-```bash
 VLLM_ROCM_SLEEP_MEM_CHUNK_SIZE=64
 --gpu-memory-utilization 0.65
 --enable-sleep-mode
 ```
 
-以下旧配置曾导致 OOM 或 `cumem_allocator.cpp invalid argument`：
+Parameters that previously caused OOM or `cumem_allocator.cpp invalid argument`:
 
 ```text
 --gpu-memory-utilization 0.90
 VLLM_ROCM_SLEEP_MEM_CHUNK_SIZE=128
 ```
 
-## 5.2 启动命令
+### 4.2 Startup Command
 
 ```bash
 cd /workspace/poster-engine
@@ -187,11 +168,7 @@ if [[ -f vllm.pid ]]; then
   kill "$(cat vllm.pid)" 2>/dev/null || true
 fi
 
-VLLM_PID="$(
-  lsof -tiTCP:8001 -sTCP:LISTEN 2>/dev/null \
-  | head -n 1
-)"
-
+VLLM_PID="$(lsof -tiTCP:8001 -sTCP:LISTEN 2>/dev/null | head -n 1)"
 if [[ -n "$VLLM_PID" ]]; then
   kill "$VLLM_PID"
 fi
@@ -217,193 +194,112 @@ nohup env \
   --enable-sleep-mode \
   --default-chat-template-kwargs '{"enable_thinking":false}' \
   --generation-config vllm \
-  > /workspace/poster-engine/logs/vllm/server.log \
-  2>&1 &
+  > /workspace/poster-engine/logs/vllm/server.log 2>&1 &
 
 echo $! > /workspace/poster-engine/vllm.pid
-
 echo "vLLM PID=$(cat /workspace/poster-engine/vllm.pid)"
 ```
 
-## 5.3 等待 vLLM 就绪
+### 4.3 Wait for vLLM Ready
 
 ```bash
 for i in $(seq 1 180); do
   CODE="$(
-    curl --max-time 5 \
-      -sS \
+    curl --max-time 5 -sS \
       -o /tmp/vllm-models.json \
       -w '%{http_code}' \
       http://127.0.0.1:8001/v1/models \
       -H "Authorization: Bearer stageposter-vlm-local" \
       2>/dev/null || true
   )"
-
-  if [[ "$CODE" == "200" ]]; then
-    echo "vLLM ready"
-    break
-  fi
-
+  [[ "$CODE" == "200" ]] && echo "vLLM ready" && break
   printf '.'
   sleep 2
 done
-
 echo
 tail -80 /workspace/poster-engine/logs/vllm/server.log
 ```
 
 ---
 
-# 6. 验证 vLLM Sleep/Wake
+## 5. Verifying vLLM Sleep/Wake Cycle
 
-## 6.1 清醒状态推理
+### 5.1 Inference While Awake
 
 ```bash
-curl --max-time 180 \
-  -sS \
-  -X POST \
+curl --max-time 180 -sS -X POST \
   http://127.0.0.1:8001/v1/chat/completions \
   -H "Authorization: Bearer stageposter-vlm-local" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "stageposter-vlm",
-    "messages": [
-      {
-        "role": "user",
-        "content": "只回复 AWAKE"
-      }
-    ],
+    "messages": [{"role": "user", "content": "Reply with AWAKE"}],
     "temperature": 0,
     "max_tokens": 8
-  }' \
-  | python3 -m json.tool
+  }' | python3 -m json.tool
 ```
 
-预期：
+Expected: `"content": "AWAKE"`
 
-```json
-{
-  "choices": [
-    {
-      "message": {
-        "content": "AWAKE"
-      }
-    }
-  ]
-}
-```
-
-## 6.2 进入睡眠
+### 5.2 Enter Sleep
 
 ```bash
-curl --max-time 180 \
-  -sS \
-  -X POST \
+curl --max-time 180 -sS -X POST \
   "http://127.0.0.1:8001/sleep?level=1" \
   -H "Authorization: Bearer stageposter-vlm-local"
 
 sleep 8
-```
 
-检查：
-
-```bash
-curl -sS \
-  http://127.0.0.1:8001/is_sleeping \
+curl -sS http://127.0.0.1:8001/is_sleeping \
   -H "Authorization: Bearer stageposter-vlm-local"
-
-echo
 rocm-smi --showmeminfo vram
 ```
 
-本次实际结果：
+Expected: `is_sleeping: true`, VRAM ~729 MB
 
-```text
-is_sleeping: true
-VRAM Used: 约 729 MB
-```
-
-## 6.3 唤醒
+### 5.3 Wake Up
 
 ```bash
-curl --max-time 300 \
-  -sS \
+curl --max-time 300 -sS \
   -D /tmp/vllm-wake.headers \
   -o /tmp/vllm-wake.body \
   -w '\nHTTP_STATUS=%{http_code}\n' \
-  -X POST \
-  http://127.0.0.1:8001/wake_up \
+  -X POST http://127.0.0.1:8001/wake_up \
   -H "Authorization: Bearer stageposter-vlm-local"
 ```
 
-预期：
+Expected: `HTTP_STATUS=200`, VRAM ~33 GB after wake
 
-```text
-HTTP_STATUS=200
-```
-
-唤醒后显存约：
-
-```text
-33 GB
-```
-
-## 6.4 唤醒后再次推理
+### 5.4 Inference After Wake
 
 ```bash
-curl --max-time 180 \
-  -sS \
-  -X POST \
+curl --max-time 180 -sS -X POST \
   http://127.0.0.1:8001/v1/chat/completions \
   -H "Authorization: Bearer stageposter-vlm-local" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "stageposter-vlm",
-    "messages": [
-      {
-        "role": "user",
-        "content": "只回复 WOKE"
-      }
-    ],
+    "messages": [{"role": "user", "content": "Reply with WOKE"}],
     "temperature": 0,
     "max_tokens": 8
-  }' \
-  | python3 -m json.tool
+  }' | python3 -m json.tool
 ```
 
-预期：
-
-```json
-{
-  "choices": [
-    {
-      "message": {
-        "content": "WOKE"
-      }
-    }
-  ]
-}
-```
+Expected: `"content": "WOKE"`
 
 ---
 
-# 7. 启动 ComfyUI
+## 6. Starting ComfyUI
 
-启动 ComfyUI 前，建议确认 vLLM 处于 sleeping 状态。
+Before starting ComfyUI, verify vLLM is sleeping:
 
 ```bash
-curl -sS \
-  http://127.0.0.1:8001/is_sleeping \
+curl -sS http://127.0.0.1:8001/is_sleeping \
   -H "Authorization: Bearer stageposter-vlm-local"
+# Expected: {"is_sleeping":true}
 ```
 
-预期：
-
-```json
-{"is_sleeping":true}
-```
-
-启动 ComfyUI：
+Start ComfyUI:
 
 ```bash
 cd /workspace/poster-engine/ComfyUI
@@ -411,15 +307,10 @@ cd /workspace/poster-engine/ComfyUI
 mkdir -p /workspace/poster-engine/logs/comfyui
 
 if [[ -f /workspace/poster-engine/comfyui.pid ]]; then
-  kill "$(cat /workspace/poster-engine/comfyui.pid)" \
-    2>/dev/null || true
+  kill "$(cat /workspace/poster-engine/comfyui.pid)" 2>/dev/null || true
 fi
 
-COMFY_PID="$(
-  lsof -tiTCP:8188 -sTCP:LISTEN 2>/dev/null \
-  | head -n 1
-)"
-
+COMFY_PID="$(lsof -tiTCP:8188 -sTCP:LISTEN 2>/dev/null | head -n 1)"
 if [[ -n "$COMFY_PID" ]]; then
   kill "$COMFY_PID"
 fi
@@ -427,56 +318,39 @@ fi
 sleep 3
 
 nohup /workspace/poster-engine/venv/bin/python \
-  main.py \
-  --listen 0.0.0.0 \
-  --port 8188 \
-  > /workspace/poster-engine/logs/comfyui/server.log \
-  2>&1 &
+  main.py --listen 0.0.0.0 --port 8188 \
+  > /workspace/poster-engine/logs/comfyui/server.log 2>&1 &
 
 echo $! > /workspace/poster-engine/comfyui.pid
-
 echo "ComfyUI PID=$(cat /workspace/poster-engine/comfyui.pid)"
 ```
 
-等待就绪：
+Wait for ready:
 
 ```bash
 for i in $(seq 1 120); do
   CODE="$(
-    curl --max-time 3 \
-      -sS \
+    curl --max-time 3 -sS \
       -o /tmp/comfy-system.json \
       -w '%{http_code}' \
       http://127.0.0.1:8188/system_stats \
       2>/dev/null || true
   )"
-
-  if [[ "$CODE" == "200" ]]; then
-    echo "ComfyUI ready"
-    break
-  fi
-
+  [[ "$CODE" == "200" ]] && echo "ComfyUI ready" && break
   printf '.'
   sleep 2
 done
-
 echo
 tail -80 /workspace/poster-engine/logs/comfyui/server.log
 ```
 
 ---
 
-# 8. 验证 ComfyUI 模型
+## 7. Verifying ComfyUI Models
 
 ```bash
-curl -sS \
-  http://127.0.0.1:8188/object_info \
-  > /tmp/comfy-object-info.json
-```
+curl -sS http://127.0.0.1:8188/object_info > /tmp/comfy-object-info.json
 
-解析模型列表：
-
-```bash
 python3 - <<'PY'
 import json
 
@@ -496,14 +370,13 @@ for node_name, input_name in checks.items():
         .get("required", {})
         .get(input_name, [[]])[0]
     )
-
     print(f"\n{node_name}:")
     for value in values:
         print("  ", value)
 PY
 ```
 
-必须包含：
+Required models:
 
 ```text
 UNETLoader:
@@ -518,16 +391,16 @@ VAELoader:
 
 ---
 
-# 9. 验证 Workflow 尺寸
+## 8. Verifying Workflow Dimensions
 
-StagePoster Candidate 合约要求：
+StagePoster Candidate contract requires:
 
 ```text
 width  = 1024
 height = 1536
 ```
 
-检查：
+Check:
 
 ```bash
 python3 - <<'PY'
@@ -541,15 +414,9 @@ with open(path) as f:
 def walk(value, path="root"):
     if isinstance(value, dict):
         if "width" in value or "height" in value:
-            print(
-                path,
-                "width=", value.get("width"),
-                "height=", value.get("height"),
-            )
-
+            print(path, "width=", value.get("width"), "height=", value.get("height"))
         for key, child in value.items():
             walk(child, f"{path}.{key}")
-
     elif isinstance(value, list):
         for index, child in enumerate(value):
             walk(child, f"{path}[{index}]")
@@ -558,19 +425,17 @@ walk(data)
 PY
 ```
 
-如果 ComfyUI 输出 `1024×1024`，Candidate 会被后端拒绝：
+If ComfyUI outputs `1024×1024`, the candidate will be rejected by the backend:
 
 ```text
-candidate rejected:
-expected 1024x1536,
-received 1024x1024
+candidate rejected: expected 1024x1536, received 1024x1024
 ```
 
 ---
 
-# 10. 启动 StagePoster Backend
+## 9. Starting StagePoster Backend
 
-先编译：
+### 9.1 Build
 
 ```bash
 cd /workspace/poster-engine/backend
@@ -578,21 +443,16 @@ cd /workspace/poster-engine/backend
 go build -o poster-backend ./cmd/server
 ```
 
-启动：
+### 9.2 Start
 
 ```bash
 mkdir -p /workspace/poster-engine/logs
 
 if [[ -f /workspace/poster-engine/backend.pid ]]; then
-  kill "$(cat /workspace/poster-engine/backend.pid)" \
-    2>/dev/null || true
+  kill "$(cat /workspace/poster-engine/backend.pid)" 2>/dev/null || true
 fi
 
-BACKEND_PID="$(
-  lsof -tiTCP:8080 -sTCP:LISTEN 2>/dev/null \
-  | head -n 1
-)"
-
+BACKEND_PID="$(lsof -tiTCP:8080 -sTCP:LISTEN 2>/dev/null | head -n 1)"
 if [[ -n "$BACKEND_PID" ]]; then
   kill "$BACKEND_PID"
 fi
@@ -620,39 +480,33 @@ nohup env \
   WORKFLOW_VERSION=1.0.0 \
   RECONCILE_INTERVAL=2s \
   ./poster-backend \
-  > /workspace/poster-engine/logs/backend.log \
-  2>&1 &
+  > /workspace/poster-engine/logs/backend.log 2>&1 &
 
 echo $! > /workspace/poster-engine/backend.pid
-
 echo "Backend PID=$(cat /workspace/poster-engine/backend.pid)"
 ```
 
-如果需要开启 API Token：
+To enable API token:
 
 ```bash
 POSTER_API_TOKEN=poster-dev-2026
 ```
 
-然后所有 Backend 请求都需要添加：
+Then all requests need:
 
 ```bash
 -H "X-Poster-Token: poster-dev-2026"
 ```
 
-本文后续命令默认不开启 Backend Token。
+Subsequent commands in this guide assume token auth is disabled.
 
----
-
-# 11. Backend 健康检查
+### 9.3 Health Check
 
 ```bash
-curl -sS \
-  http://127.0.0.1:8080/health \
-  | python3 -m json.tool
+curl -sS http://127.0.0.1:8080/health | python3 -m json.tool
 ```
 
-预期：
+Expected:
 
 ```json
 {
@@ -662,25 +516,19 @@ curl -sS \
 }
 ```
 
-检查依赖：
+Check dependencies:
 
 ```bash
-curl -sS \
-  http://127.0.0.1:8080/api/system/dependencies \
-  | python3 -m json.tool
+curl -sS http://127.0.0.1:8080/api/system/dependencies | python3 -m json.tool
 ```
 
-预期：
+Expected:
 
 ```json
 {
   "dependencies": {
-    "comfyui": {
-      "status": "ready"
-    },
-    "database": {
-      "status": "ready"
-    },
+    "comfyui": { "status": "ready" },
+    "database": { "status": "ready" },
     "vlm": {
       "model": "stageposter-vlm",
       "sleeping": true,
@@ -694,62 +542,44 @@ curl -sS \
 
 ---
 
-# 12. 完整 Candidate 生成复现流程
+## 10. Full Candidate Generation Reproduction
 
-## 12.1 创建 Session
+### 10.1 Create Session
 
 ```bash
-curl -sS \
-  -X POST \
-  http://127.0.0.1:8080/api/ai/sessions \
+curl -sS -X POST http://127.0.0.1:8080/api/ai/sessions \
   -H "Content-Type: application/json" \
-  -d '{}' \
-  | tee /tmp/stageposter-session-create.json \
-  | python3 -m json.tool
-```
+  -d '{}' | tee /tmp/stageposter-session-create.json | python3 -m json.tool
 
-提取 Session ID：
-
-```bash
 export SESSION_ID="$(
-python3 - <<'PY'
-import json
-
-with open("/tmp/stageposter-session-create.json") as f:
-    print(json.load(f)["sessionId"])
-PY
+  python3 -c "import json; print(json.load(open('/tmp/stageposter-session-create.json'))['sessionId'])"
 )"
-
 echo "SESSION_ID=$SESSION_ID"
 ```
 
-## 12.2 发送用户 Brief
+### 10.2 Send User Brief
 
 ```bash
-curl --max-time 480 \
-  -sS \
-  -X POST \
+curl --max-time 480 -sS -X POST \
   "http://127.0.0.1:8080/api/ai/sessions/$SESSION_ID/messages" \
   -H "Content-Type: application/json" \
   -d '{
-    "content": "我要制作一张音乐节海报。活动名 Abyssal Kingdom Festival，艺人 Maverick，2026-08-21 晚上 20:00，场地 Void Arena。音乐类型是 gothic metal，风格是 dark fantasy editorial，主题是 abyssal gothic kingdom，氛围要 epic、mysterious、ritualistic，颜色以 black、aged ivory、deep red 为主。画面核心是黑色王座和巨大羽翼，要高级、有压迫感，禁止生成文字。"
-  }' \
-  | tee /tmp/stageposter-session-message.json \
-  | python3 -m json.tool
+    "content": "I want to create a music festival poster. Event: Abyssal Kingdom Festival, artist: Maverick, date: 2026-08-21 at 20:00, venue: Void Arena. Genre: gothic metal. Style: dark fantasy editorial. Theme: abyssal gothic kingdom. Mood: epic, mysterious, ritualistic. Colors: black, aged ivory, deep red. Core imagery: black throne with massive wings. Premium, oppressive feel. NO TEXT in the image."
+  }' | tee /tmp/stageposter-session-message.json | python3 -m json.tool
 ```
 
-这一阶段 Backend 会：
+During this phase, the backend:
 
 ```text
-检测 vLLM 正在睡眠
-→ POST /wake_up
-→ 调用 Qwen
-→ 提取结构化 Brief
-→ 生成三套 Plan
-→ POST /sleep?level=1
+Detects vLLM is sleeping
+  → POST /wake_up
+  → Call Qwen
+  → Extract structured Brief
+  → Generate 3 Plans
+  → POST /sleep?level=1
 ```
 
-验证：
+Verify:
 
 ```bash
 python3 - <<'PY'
@@ -772,60 +602,38 @@ print("BRIEF + PLAN FLOW OK")
 PY
 ```
 
-## 12.3 验证 Qwen 自动睡眠
+### 10.3 Verify Qwen Auto-Sleep
 
 ```bash
-curl -sS \
-  http://127.0.0.1:8001/is_sleeping \
+curl -sS http://127.0.0.1:8001/is_sleeping \
   -H "Authorization: Bearer stageposter-vlm-local"
-
 echo
 rocm-smi --showmeminfo vram
 ```
 
-预期：
+Expected: `is_sleeping: true`
 
-```json
-{"is_sleeping":true}
-```
-
-## 12.4 提取 Plan ID
+### 10.4 Extract Plan ID
 
 ```bash
 export PLAN_ID="$(
-python3 - <<'PY'
-import json
-
-with open("/tmp/stageposter-session-message.json") as f:
-    data = json.load(f)
-
-print(data["session"]["plans"][0]["planId"])
-PY
+  python3 -c "import json; print(json.load(open('/tmp/stageposter-session-message.json'))['session']['plans'][0]['planId'])"
 )"
-
 echo "PLAN_ID=$PLAN_ID"
 ```
 
-## 12.5 确认 Plan
+### 10.5 Confirm Plan
 
 ```bash
-curl --max-time 300 \
-  -sS \
-  -X POST \
+curl --max-time 300 -sS -X POST \
   "http://127.0.0.1:8080/api/ai/sessions/$SESSION_ID/plans/$PLAN_ID/confirm" \
   -H "Content-Type: application/json" \
-  -d '{}' \
-  | tee /tmp/stageposter-plan-confirm.json
+  -d '{}' | tee /tmp/stageposter-plan-confirm.json
+
+python3 -m json.tool < /tmp/stageposter-plan-confirm.json
 ```
 
-格式化：
-
-```bash
-python3 -m json.tool \
-  < /tmp/stageposter-plan-confirm.json
-```
-
-预期：
+Expected:
 
 ```json
 {
@@ -834,27 +642,20 @@ python3 -m json.tool \
 }
 ```
 
-提取 Poster ID：
+Extract Poster ID:
 
 ```bash
 export POSTER_ID="$(
-python3 - <<'PY'
-import json
-
-with open("/tmp/stageposter-plan-confirm.json") as f:
-    print(json.load(f)["posterId"])
-PY
+  python3 -c "import json; print(json.load(open('/tmp/stageposter-plan-confirm.json'))['posterId'])"
 )"
-
 echo "POSTER_ID=$POSTER_ID"
 ```
 
-## 12.6 轮询 Candidate
+### 10.6 Poll for Candidates
 
 ```bash
 for i in $(seq 1 240); do
-  curl -sS \
-    "http://127.0.0.1:8080/api/ai/sessions/$SESSION_ID" \
+  curl -sS "http://127.0.0.1:8080/api/ai/sessions/$SESSION_ID" \
     > /tmp/stageposter-session-status.json
 
   python3 - <<'PY'
@@ -872,55 +673,38 @@ print(
     "progress=", poster.get("progress"),
     "candidates=",
     [
-        (
-            candidate.get("status"),
-            candidate.get("attempt"),
-        )
-        for candidate in candidates
+        (c.get("status"), c.get("attempt"))
+        for c in candidates
     ],
 )
 PY
 
-  STATUS="$(
-    python3 - <<'PY'
-import json
-
-with open("/tmp/stageposter-session-status.json") as f:
-    print(json.load(f).get("status", ""))
-PY
-  )"
+  STATUS="$(python3 -c "import json; print(json.load(open('/tmp/stageposter-session-status.json')).get('status',''))")"
 
   case "$STATUS" in
-    awaiting_candidate_selection|failed)
-      break
-      ;;
+    awaiting_candidate_selection|failed) break ;;
   esac
 
   sleep 3
 done
 ```
 
-成功状态：
+Expected result:
 
 ```text
 session=awaiting_candidate_selection
 poster=awaiting_selection
 progress={completed:3,total:3}
-candidates=[
-  (ready,1),
-  (ready,1),
-  (ready,1)
-]
+candidates=[(ready,1), (ready,1), (ready,1)]
 ```
 
-## 12.7 查看最终 Session
+### 10.7 View Final Session
 
 ```bash
-python3 -m json.tool \
-  < /tmp/stageposter-session-status.json
+python3 -m json.tool < /tmp/stageposter-session-status.json
 ```
 
-预期 Candidate：
+Expected candidate:
 
 ```json
 {
@@ -930,33 +714,7 @@ python3 -m json.tool \
 }
 ```
 
----
-
-# 13. 下载候选图
-
-列出 Candidate ID：
-
-```bash
-python3 - <<'PY'
-import json
-
-with open("/tmp/stageposter-session-status.json") as f:
-    data = json.load(f)
-
-for index, candidate in enumerate(
-    data["poster"]["candidates"],
-    start=1,
-):
-    print(
-        index,
-        candidate["candidateId"],
-        candidate["variantName"],
-        candidate["imageUrl"],
-    )
-PY
-```
-
-下载三张候选图：
+### 10.8 Download Candidates
 
 ```bash
 mkdir -p /tmp/stageposter-candidates
@@ -969,138 +727,103 @@ with open("/tmp/stageposter-session-status.json") as f:
     data = json.load(f)
 
 for index, candidate in enumerate(
-    data["poster"]["candidates"],
-    start=1,
+    data["poster"]["candidates"], start=1
 ):
     url = "http://127.0.0.1:8080" + candidate["imageUrl"]
     output = f"/tmp/stageposter-candidates/candidate-{index}.png"
-
-    subprocess.run(
-        ["curl", "-sS", url, "-o", output],
-        check=True,
-    )
-
+    subprocess.run(["curl", "-sS", url, "-o", output], check=True)
     print(output)
 PY
 ```
 
-检查尺寸：
+Check dimensions:
 
 ```bash
 file /tmp/stageposter-candidates/*.png
-```
-
-使用 ImageMagick 时：
-
-```bash
-identify /tmp/stageposter-candidates/*.png
-```
-
-预期：
-
-```text
-1024x1536
+# Expected: 1024x1536
 ```
 
 ---
 
-# 14. Candidate 生成后释放 ComfyUI 显存
+## 11. Releasing ComfyUI VRAM After Candidates
 
 ```bash
-curl -sS \
-  -X POST \
-  http://127.0.0.1:8188/free \
+curl -sS -X POST http://127.0.0.1:8188/free \
   -H "Content-Type: application/json" \
-  -d '{
-    "unload_models": true,
-    "free_memory": true
-  }'
+  -d '{"unload_models": true, "free_memory": true}'
 
 sleep 8
-
 rocm-smi --showmeminfo vram
 ```
 
-本次实际测试：
-
-```text
-ComfyUI /free 后 VRAM Used:
-约 1.33 GB
-```
-
-这样后续 Qwen Review 可以安全调用：
+After `/free`, VRAM drops to ~1.33 GB. This frees memory for the Qwen Review
+phase:
 
 ```text
 /wake_up
-→ Review
-→ /sleep?level=1
+  → Review
+  → /sleep?level=1
 ```
 
 ---
 
-# 15. 显存状态机
+## 12. VRAM State Machine
 
-## 15.1 Qwen 阶段
+### 12.1 Qwen Phase
 
 ```text
-初始：
-vLLM sleeping
-ComfyUI 空闲或已 free
-VRAM ≈ 0.7GB 到 1.3GB
+Initial:
+  vLLM sleeping
+  ComfyUI idle or freed
+  VRAM ≈ 0.7–1.3 GB
 
-Backend 接收用户消息
-→ POST vLLM /wake_up
-→ Qwen 生成 Brief / Plan
-→ POST vLLM /sleep?level=1
+Backend receives user message
+  → POST vLLM /wake_up
+  → Qwen generates Brief / Plan
+  → POST vLLM /sleep?level=1
 
-结束：
-vLLM sleeping=true
-VRAM 再次下降
+End state:
+  vLLM sleeping=true
+  VRAM drops again
 ```
 
-## 15.2 ComfyUI 阶段
+### 12.2 ComfyUI Phase
 
 ```text
-用户确认 Plan
-→ Backend 创建 Poster
-→ Worker 提交三次 ComfyUI Workflow
-→ Z-Image 依次生成三张 Candidate
-→ Session 进入 awaiting_candidate_selection
-→ POST ComfyUI /free
+User confirms Plan
+  → Backend creates Poster
+  → Worker submits 3 ComfyUI Workflows
+  → Z-Image generates 3 Candidates sequentially
+  → Session enters awaiting_candidate_selection
+  → POST ComfyUI /free
 
-结束：
-三张 Candidate ready
-ComfyUI 权重卸载
-VRAM ≈ 1GB
+End state:
+  3 Candidates ready
+  ComfyUI weights unloaded
+  VRAM ≈ 1 GB
 ```
 
-## 15.3 Review 阶段
-
-下一阶段预期：
+### 12.3 Review Phase
 
 ```text
-用户选择 Candidate
-→ Composer 叠加活动文字与 Logo
-→ Backend 调用 vLLM /wake_up
-→ Qwen Review 最终海报
-→ ACCEPT / RECOMPOSE / REGENERATE
-→ Backend 调用 vLLM /sleep?level=1
+User selects Candidate
+  → Composer overlays event text and Logo
+  → Backend calls vLLM /wake_up
+  → Qwen reviews final poster
+  → ACCEPT / RECOMPOSE / REGENERATE
+  → Backend calls vLLM /sleep?level=1
 ```
 
 ---
 
-# 16. 常见错误
+## 13. Common Errors
 
-## 16.1 `AI session service is not configured`
+### 13.1 `AI session service is not configured`
 
-原因：
+Cause: Server only injected partial AI dependencies. `aiClient`, `aiService`,
+`aiRuntime`, `aiSessionService` are incomplete.
 
-```text
-Server 中只注入了部分 AI 依赖
-aiClient / aiService / aiRuntime / aiSessionService 不完整
-```
-
-推荐使用：
+Fix:
 
 ```go
 aiConfig := api.NewAIConfigFromEnv()
@@ -1110,221 +833,168 @@ api.NewServer(...).
     WithAISessions(aiSessionService)
 ```
 
-## 16.2 `unauthorized`
+### 13.2 `unauthorized`
 
-Backend 启动时设置了：
-
-```bash
-POSTER_API_TOKEN=poster-dev-2026
-```
-
-请求需要：
+Backend was started with `POSTER_API_TOKEN=poster-dev-2026`. Add the header:
 
 ```bash
 -H "X-Poster-Token: poster-dev-2026"
 ```
 
-## 16.3 `POST /api/ai/sessions//plans/...`
+### 13.3 `POST /api/ai/sessions//plans/...`
 
-原因：
+Cause: `SESSION_ID` is empty.
 
-```text
-SESSION_ID 为空
-```
-
-检查：
+Check:
 
 ```bash
 echo "SESSION_ID=$SESSION_ID"
 echo "PLAN_ID=$PLAN_ID"
 ```
 
-## 16.4 `AI session is terminal`
+### 13.4 `AI session is terminal`
 
-原因：
+The session is already in `failed`, `completed`, or `terminal` state. Create a
+new session. Do not re-confirm an old plan.
 
-Session 已经进入：
+### 13.5 Model `not in []`
 
-```text
-failed
-completed
-terminal
-```
-
-必须创建新 Session，不能重复 Confirm。
-
-## 16.5 模型 `not in []`
-
-例如：
+Example:
 
 ```text
 z_image_turbo_bf16.safetensors not in []
 qwen_3_4b.safetensors not in []
 ```
 
-原因：
+Cause: ComfyUI cannot find the models.
 
-ComfyUI 没发现模型。
-
-检查：
+Check:
 
 ```bash
-curl -sS http://127.0.0.1:8188/object_info \
-  > /tmp/comfy-object-info.json
+curl -sS http://127.0.0.1:8188/object_info > /tmp/comfy-object-info.json
 ```
 
-以及模型软链接。
+Also verify model symlinks.
 
-## 16.6 `expected 1024x1536, received 1024x1024`
+### 13.6 `expected 1024x1536, received 1024x1024`
 
-原因：
+Cause: Workflow output dimensions don't match the backend Candidate contract.
 
-Workflow 输出尺寸和 Backend Candidate 合约不一致。
-
-必须设置：
+Must set:
 
 ```text
 width=1024
 height=1536
 ```
 
-## 16.7 `wake VLM runtime: CUDA Error: out of memory`
+### 13.7 `wake VLM runtime: CUDA Error: out of memory`
 
-检查：
+Check:
 
 ```bash
 rocm-smi --showmeminfo vram
 rocm-smi --showpids
 ```
 
-先释放 ComfyUI：
+Free ComfyUI first:
 
 ```bash
-curl -sS \
-  -X POST \
-  http://127.0.0.1:8188/free \
+curl -sS -X POST http://127.0.0.1:8188/free \
   -H "Content-Type: application/json" \
-  -d '{
-    "unload_models": true,
-    "free_memory": true
-  }'
+  -d '{"unload_models": true, "free_memory": true}'
 ```
 
-使用已验证参数：
+Use verified parameters:
 
 ```text
 VLLM_ROCM_SLEEP_MEM_CHUNK_SIZE=64
 gpu-memory-utilization=0.65
 ```
 
-## 16.8 `cumem_allocator.cpp invalid argument`
+### 13.8 `cumem_allocator.cpp invalid argument`
 
-当前 vLLM Sleep Allocator 已进入异常状态。
-
-停止 vLLM：
+The vLLM Sleep Allocator is in an abnormal state. Stop vLLM, confirm VRAM is
+released, and restart with stable parameters:
 
 ```bash
-VLLM_PID="$(
-  lsof -tiTCP:8001 -sTCP:LISTEN \
-  | head -n 1
-)"
-
+VLLM_PID="$(lsof -tiTCP:8001 -sTCP:LISTEN | head -n 1)"
 kill "$VLLM_PID"
 ```
 
-确认显存释放后，使用稳定参数重新启动。
-
 ---
 
-# 17. 官方复现检查表
+## 14. Reproduction Checklist
 
-复现者需要依次确认：
-
-```text
-[ ] /workspace 中包含所有持久化模型
-[ ] Go Backend 编译成功
-[ ] vLLM /v1/models 返回 200
-[ ] vLLM 清醒推理成功
-[ ] vLLM sleep 后 VRAM 明显下降
-[ ] vLLM wake_up 返回 200
-[ ] wake 后推理成功
-[ ] ComfyUI /system_stats 返回 200
-[ ] ComfyUI object_info 能发现三个 Z-Image 模型
-[ ] Workflow 输出尺寸为 1024×1536
-[ ] Backend /health 返回 ok
-[ ] Backend dependencies 返回 healthy
-[ ] 创建 Session 成功
-[ ] Brief 生成成功
-[ ] 三套 Plan 生成成功
-[ ] Qwen 自动进入 sleep
-[ ] Confirm Plan 成功
-[ ] 三张 Candidate 全部 ready
-[ ] Candidate 图片尺寸为 1024×1536
-[ ] ComfyUI /free 后显存下降
-```
-
----
-
-# 18. 当前已验证结果
-
-本次实际成功结果：
+Reproducers must confirm each step in order:
 
 ```text
-Session:
-session_377a7046-5d12-42e2-aad1-0d4d5faa3edd
-
-Poster:
-poster_ee608a7a-3ffb-4ee0-b5fd-28ed8e9d8825
-
-Plan:
-abyssal-crown-silhouette
-
-Candidate:
-3 / 3 ready
-
-Session status:
-awaiting_candidate_selection
-
-Poster status:
-awaiting_selection
-
-Candidate attempts:
-全部为 1
-
-vLLM Sleep:
-约 33GB → 729MB
-
-ComfyUI /free:
-显存下降至约 1.33GB
+[ ] /workspace contains all persistent models
+[ ] Go Backend compiles successfully
+[ ] vLLM /v1/models returns 200
+[ ] vLLM awake inference succeeds
+[ ] vLLM VRAM drops after sleep
+[ ] vLLM /wake_up returns 200
+[ ] Inference succeeds after wake
+[ ] ComfyUI /system_stats returns 200
+[ ] ComfyUI object_info shows all 3 Z-Image models
+[ ] Workflow output dimensions are 1024×1536
+[ ] Backend /health returns ok
+[ ] Backend /api/system/dependencies returns healthy
+[ ] Create Session succeeds
+[ ] Brief generation succeeds
+[ ] 3 Design Plans generated
+[ ] Qwen auto-enters sleep
+[ ] Confirm Plan succeeds
+[ ] All 3 Candidates ready
+[ ] Candidate images are 1024×1536
+[ ] ComfyUI /free reduces VRAM
 ```
 
 ---
 
-# 19. 当前架构边界
+## 15. Verified Results
 
-当前流程已经验证：
-
-```text
-用户输入
-→ Qwen Brief
-→ Qwen Plans
-→ Plan Confirm
-→ Z-Image Candidates
-→ Candidate Selection Ready
-```
-
-尚待继续验证：
+Successful reproduction:
 
 ```text
-用户选择 Candidate
-→ Composer
-→ Logo / 文本排版
-→ Qwen Visual Review
-→ ACCEPT / RECOMPOSE / REGENERATE
-→ 最终 Poster
+Session:  session_377a7046-5d12-42e2-aad1-0d4d5faa3edd
+Poster:   poster_ee608a7a-3ffb-4ee0-b5fd-28ed8e9d8825
+Plan:     abyssal-crown-silhouette
+Candidates: 3 / 3 ready
+Session status: awaiting_candidate_selection
+Poster status: awaiting_selection
+Candidate attempts: all 1
+vLLM Sleep: ~33 GB → 729 MB
+ComfyUI /free: VRAM drops to ~1.33 GB
 ```
 
-另外，当前 Workflow 接收的是：
+---
+
+## 16. Current Architecture Boundaries
+
+**Verified:**
+
+```text
+User input
+  → Qwen Brief
+  → Qwen Plans
+  → Plan Confirm
+  → Z-Image Candidates
+  → Candidate Selection Ready
+```
+
+**Pending verification:**
+
+```text
+User selects Candidate
+  → Composer
+  → Logo / Text composition
+  → Qwen Visual Review
+  → ACCEPT / RECOMPOSE / REGENERATE
+  → Final Poster
+```
+
+The current Workflow receives:
 
 ```text
 prompt
@@ -1332,4 +1002,6 @@ negative prompt
 seed
 ```
 
-上传的 `performer` 或 `reference` Asset 可以被 Qwen 看见并影响方案，但尚未作为图像条件直接送入扩散模型。后续需要在 ComfyUI Workflow 中增加 image conditioning 节点。
+Uploaded `performer` or `reference` Assets can be seen by Qwen and influence
+plans, but are not yet passed as image conditioning to the diffusion model.
+Future work: add image conditioning nodes to the ComfyUI Workflow.

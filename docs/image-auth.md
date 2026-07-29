@@ -1,11 +1,18 @@
-## 图片鉴权
-如果启用了：
-POSTER_API_TOKEN=poster-dev-2026
-浏览器直接：
-<img src="/api/posters/.../image">
-不能自动带 X-Poster-Token。
-所以当前需要三选一：
-本地 Demo 不开启 Backend Token。
-前端使用 fetch 带 Header，再转成 Blob URL。
-后端生成短时签名图片 URL。
-黑客松 MVP 推荐第 1 或第 2 种。正式环境再做签名 URL 或 Cookie 鉴权
+# Image Authentication
+
+## How it works
+
+When `POSTER_API_TOKEN` is enabled, browsers cannot automatically attach
+`X-Poster-Token` to `<img src="/api/posters/.../image">` requests.
+
+Choose one of three approaches:
+
+1. **Local dev — disable Backend Token.** Keep `POSTER_API_TOKEN=` empty.
+2. **Frontend uses `fetch()` with headers, converts to Blob URL.** The
+   frontend fetches via `X-Poster-Token`, then creates a local object URL
+   for `<img>`.
+3. **Backend generates short-lived signed image URLs.** Recommended for
+   production.
+
+For hackathon MVP, option 1 or 2 is sufficient. Implement signed URLs or
+Cookie-based auth before going to production.

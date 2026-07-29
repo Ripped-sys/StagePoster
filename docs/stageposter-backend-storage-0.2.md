@@ -1,5 +1,11 @@
-# 让后端拥有生命周期
-```text
+# StagePoster Backend Storage Specification v0.2
+
+## Goal
+
+Give the backend ownership of the full lifecycle: metadata, assets, jobs,
+workflows, composition, and the public API.
+
+```
 Frontend
    ↓
 Go API
@@ -11,50 +17,57 @@ Go API
    ↓
 ComfyUI
    ↓
-AMD W7900
-
+AMD W7900 GPU
 ```
-ComfyUI 负责生成视觉素材。
-Go 后端负责产品逻辑、任务、文件、版本、合成和接口。
 
+ComfyUI handles visual generation. The Go backend owns product logic, tasks,
+files, versioning, composition, and the API.
+
+### Job Lifecycle
 
 ```
 POST /generate
   ↓
 INSERT jobs(status=queued)
   ↓
-提交 ComfyUI
+Submit to ComfyUI
   ↓
 UPDATE jobs(comfy_prompt_id, status=running)
   ↓
-后台 Worker 查询结果
+Background worker polls for result
   ↓
-复制文件到 storage/jobs/{jobId}
+Copy file to storage/jobs/{jobId}
   ↓
 INSERT outputs
   ↓
 UPDATE jobs(status=succeeded)
 ```
 
-backend rerun 
-···
-查询 queued / running 任务
-        ↓
-重新向 ComfyUI 对账
-        ↓
-恢复状态
-···
+### Backend Restart Recovery
 
-Job Reconciliation
+On restart, the backend:
+1. Queries `queued` / `running` jobs
+2. Reconciles state with ComfyUI
+3. Recovers to the correct status
 
-新增接口
-GET  /api/jobs
-GET  /api/jobs/{jobId}/outputs
-POST /api/jobs/{jobId}/cancel
-POST /api/jobs/{jobId}/retry
+### Job API
 
-任务列表
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/jobs` | List jobs |
+| `GET` | `/api/jobs/{jobId}/outputs` | Get job outputs |
+| `POST` | `/api/jobs/{jobId}/cancel` | Cancel a job |
+| `POST` | `/api/jobs/{jobId}/retry` | Retry a failed job |
+
+List with pagination:
+
+```
 GET /api/jobs?status=succeeded&limit=20&cursor=xxx
+```
+
+Response:
+
+```json
 {
   "items": [
     {
@@ -68,90 +81,77 @@ GET /api/jobs?status=succeeded&limit=20&cursor=xxx
   ],
   "nextCursor": null
 }
+```
 
+### Phase 2: Asset Pipeline
 
-第二阶段：Asset Pipeline
-持久化之后再做素材上传。
-新接口
+After persistence, add asset upload:
+
+```
 POST /api/assets
 GET  /api/assets/{assetId}
-前端先上传：
-人物照片 → asset_person_01
-Logo     → asset_logo_01
-参考图   → asset_reference_01
-生成接口升级为：
+```
+
+Frontend uploads assets first:
+
+```
+person photo → asset_person_01
+Logo         → asset_logo_01
+reference    → asset_reference_01
+```
+
+Generation requests reference assets by ID:
+
+```json
 {
   "workflow": "poster-reference",
   "prompt": "cinematic live concert poster",
   "seed": 88,
-
   "assets": {
     "person": "asset_person_01",
     "logo": "asset_logo_01",
     "reference": "asset_reference_01"
   }
 }
-后端再把素材上传到 ComfyUI，并写入对应 LoadImage 节点。
-这一步才需要你在 ComfyUI 页面增加输入图片节点，并重新导出 API Workflow。
-第三阶段：Workflow Registry
-不要让后端只认识一个 Workflow。
-生成接口以后应该支持：
+```
+
+The backend uploads assets to ComfyUI and writes to the corresponding
+`LoadImage` nodes.
+
+### Phase 3: Workflow Registry
+
+Support multiple workflows:
+
+```json
 {
   "workflow": "poster-text",
   "version": "1.0.0",
   "prompt": "...",
   "seed": 88
 }
-后端维护一个绑定清单：
+```
+
+Backend maintains a binding map:
+
+```json
 {
-  "prompt": {
-    "nodeId": "57:27",
-    "inputKey": "text"
-  },
-  "seed": {
-    "nodeId": "57:3",
-    "inputKey": "seed"
-  },
-  "width": {
-    "nodeId": "57:13",
-    "inputKey": "width"
-  },
-  "height": {
-    "nodeId": "57:13",
-    "inputKey": "height"
-  }
+  "prompt": { "nodeId": "57:27", "inputKey": "text" },
+  "seed":   { "nodeId": "57:3",  "inputKey": "seed" },
+  "width":  { "nodeId": "57:13", "inputKey": "width" },
+  "height": { "nodeId": "57:13", "inputKey": "height" }
 }
-不建议长期依靠自动识别节点。自动识别适合第一次烟雾测试，正式系统应该显式绑定。
-现有 Workflow 现在就能扩展的字段
-你已经有：
-Prompt：57:27 / text
-Seed：57:3 / seed
-Width：57:13 / width
-Height：57:13 / height
-因此不改 ComfyUI，现有接口就可以先加入：
-{
-  "prompt": "...",
-  "seed": 88,
-  "width": 1024,
-  "height": 1536
-}
-这非常适合先支持：
-1:1   社交媒体
-4:5   Instagram 海报
-2:3   标准宣传海报
-9:16  抖音 / Reels
-16:9  屏幕背景
-不过后端需要限制尺寸，避免前端随手填个 16000 × 16000 把 GPU 烤成太阳饼。
+```
 
+Auto-detection is suitable for initial smoke testing only. Production
+systems should use explicit bindings.
 
-# 下一阶段
-生成任务
-  ↓
-写入 SQLite
-  ↓
-图片归档到 backend/storage
-  ↓
-重启 Go 后端
-  ↓
-任务记录和图片仍然可访问
+Current bindings already available:
 
+| Field | Node ID | Input Key |
+|---|---|---|
+| Prompt | `57:27` | `text` |
+| Seed | `57:3` | `seed` |
+| Width | `57:13` | `width` |
+| Height | `57:13` | `height` |
+
+No ComfyUI changes needed — the API can already accept `width` and `height`.
