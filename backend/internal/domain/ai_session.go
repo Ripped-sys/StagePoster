@@ -97,8 +97,14 @@ type AISessionAssetRecord struct {
 	Width        int                   `json:"width"`
 	Height       int                   `json:"height"`
 
-	StoragePath string    `json:"-"`
-	CreatedAt   time.Time `json:"createdAt"`
+	StoragePath string `json:"-"`
+
+	// Usage tracking
+	UsedInStage  []string `json:"usedInStage,omitempty"` // plan / candidate / logo_overlay / review
+	ActuallyUsed bool     `json:"actuallyUsed"`         // 实际参与生成
+	UsageNote    string   `json:"usageNote,omitempty"`   // 简要说明
+
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type AIDesignPlanRecord struct {

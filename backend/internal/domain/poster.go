@@ -8,11 +8,13 @@ const (
 	PosterStatusPlanning          PosterStatus = "planning_candidates"
 	PosterStatusGenerating        PosterStatus = "generating_candidates"
 	PosterStatusValidating        PosterStatus = "validating_candidates"
+	PosterStatusPartialReady      PosterStatus = "partial_ready"
 	PosterStatusAwaitingSelection PosterStatus = "awaiting_selection"
 	PosterStatusSelected          PosterStatus = "selected"
 	PosterStatusComposing         PosterStatus = "composing"
 	PosterStatusSucceeded         PosterStatus = "succeeded"
 	PosterStatusFailed            PosterStatus = "failed"
+	PosterStatusCanceled          PosterStatus = "canceled"
 )
 
 type CandidateStatus string
@@ -62,6 +64,24 @@ type GoalContract struct {
 	AllowReadableText   bool `json:"allowReadableText"`
 	RequireCentralMotif bool `json:"requireCentralMotif"`
 	MaxAttempts         int  `json:"maxAttempts"`
+}
+
+type PersonIdentityControl struct {
+	Similarity  float64 `json:"similarity"`  // 0-1, IP-Adapter similarity
+	MaskBlur    int     `json:"maskBlur"`    // IP-Adapter mask blur radius
+	FaceRestore bool    `json:"faceRestore"` // 是否启用人脸修复
+}
+
+type StyleReferenceControl struct {
+	Strength        float64  `json:"strength"`         // ControlNet strength (0-1)
+	ColorConstraint []string `json:"colorConstraint"`  // 颜色约束
+	CompositionRef  bool     `json:"compositionRef"`   // 构图参考
+	MaterialRef     []string `json:"materialRef"`      // 材质参考
+}
+
+type GenerationControl struct {
+	PersonIdentity *PersonIdentityControl `json:"personIdentity,omitempty"`
+	StyleReference *StyleReferenceControl `json:"styleReference,omitempty"`
 }
 
 type CandidateSpec struct {

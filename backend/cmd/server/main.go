@@ -144,6 +144,11 @@ func main() {
 		assetStore,
 	)
 
+	assetProcessor := service.NewAssetProcessor(
+		repositoryInstance,
+		2,
+	)
+
 	posterComposer, err := composer.New(
 		posterOutputRoot,
 		os.Getenv("POSTER_FONT_REGULAR"),
@@ -193,6 +198,16 @@ func main() {
 		aiConfig,
 	).WithAISessions(
 		aiSessionService,
+	).WithAssetProcessor(
+		assetProcessor,
+	).WithHealthCollector(
+		service.NewHealthCollector(
+			comfyURL,
+			aiConfig.Client,
+			aiConfig.Model,
+			aiConfig.Client.IsSleeping,
+			workflowVersion,
+		),
 	)
 
 	server := &http.Server{
@@ -236,14 +251,17 @@ func main() {
 			)
 		defer cancel()
 
-		if err := server.Shutdown(
+		_ = server.Shutdown(
 			shutdownContext,
-		); err != nil {
-			log.Printf(
-				"server shutdown warning: %v",
-				err,
+		)
+
+		assetShutdownCtx, assetCancel :=
+			context.WithTimeout(
+				context.Background(),
+				5*time.Second,
 			)
-		}
+		defer assetCancel()
+		_ = assetProcessor.Shutdown(assetShutdownCtx)
 	}()
 
 	log.Printf(

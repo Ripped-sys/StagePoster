@@ -34,21 +34,22 @@ Qwen Vision 视觉审查与有限轮自动优化
 | SQLite | Ready | `/workspace/poster-engine/backend/data/poster.db` |
 | Cloudflare Quick Tunnel | 开发联调 | `https://<random>.trycloudflare.com` |
 | 完整海报闭环 | Passed | 3 candidates → select → compose → review → final |
+| 冒烟测试 | Passed | scripts/smoke-test.sh 全部通过 |
 
-已验证的一次完整 E2E：
+已验证的一次完整 E2E（2026-07-29 冒烟测试）：
 
 | 字段 | 验证结果 |
 |---|---|
-| Session | `session_8425c32c-a816-4101-b36e-eaa19565399c` |
-| 设计方案 | `gothic-throne-center` |
-| Poster | `poster_effb132a-6115-4a34-864d-ee65a9fff911` |
+| Session | `session_71a2f36d-bd35-4a92-8fe7-92de20aed972` |
+| 设计方案 | `abyssal-red-dimension` (深渊红维度的王座) |
+| Poster | `poster_5b5c743a-1314-42f9-a186-85053b50d446` |
 | 候选图 | 3 / 3 ready |
-| 已选 Candidate | `candidate_98400338-d34c-47df-8a16-4286e43f5cbe` |
-| Poster 状态 | `succeeded` |
+| 已选 Candidate | `candidate_cb3c5483-cf02-485a-8b62-9f065ea1203b` |
+| Poster 状态 | `completed_with_warnings` |
 | Finalize 状态 | `completed_with_warnings` |
 | 审查轮数 | 2 |
 | 最佳评分 | 88 |
-| 最终文件 | 约 1.2 MB PNG |
+| 最终文件 | 约 1.0 MB PNG (1024×1536) |
 
 `completed_with_warnings` 是合法终态，表示自动审查达到最大轮数后，系统保留了评分最高且可用的版本，并不表示海报文件生成失败。
 
@@ -93,6 +94,53 @@ ComfyUI Node IDs
 ```
 
 浏览器不直接调用 ComfyUI 或 vLLM。这样可以隐藏模型路径、工作流节点、队列协议和 GPU 调度细节。
+
+---
+
+## 3. 一键部署
+
+**新环境首次部署**（从零开始安装所有依赖）：
+
+```bash
+cd /workspace/poster-engine
+sudo -E bash scripts/install-all.sh
+```
+
+脚本会自动完成：
+1. ✅ 检查/安装 ROCm 驱动
+2. ✅ 安装系统工具（build-essential、git、jq、sqlite3 等）
+3. ✅ 安装 uv 包管理器
+4. ✅ 安装 Go 1.25.0
+5. ✅ 安装 cloudflared
+6. ✅ 克隆 ComfyUI（如不存在）
+7. ✅ 创建 ComfyUI Python 3.10.20 环境 + ROCm Torch 2.13.0
+8. ✅ 创建 vLLM Python 3.12 环境 + ROCm vLLM 0.20.0
+9. ✅ 下载 Qwen3.5-9B + Z-Image Turbo 模型（带 SHA256 校验，约 21 GB）
+10. ✅ 编译 Go Backend
+11. ✅ 生成 `.env` 配置文件
+12. ✅ 启动 ComfyUI、vLLM、Backend 三项服务
+13. ✅ 执行健康检查
+
+**详细文档**：见 [docs/one-click-deployment.md](docs/one-click-deployment.md)
+
+**环境变量**：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `SKIP_APT=1` | `0` | 跳过 apt 安装 |
+| `SKIP_COMFY_TORCH=1` | `0` | 跳过 ComfyUI Torch 安装 |
+| `DOWNLOAD_MODELS=0` | `1` | 跳过模型下载 |
+| `INSTALL_ROCM=1` | `0` | 安装 ROCm 驱动（通常不需要） |
+
+**服务管理**：
+
+```bash
+./scripts/start-all.sh      # 启动所有服务
+./scripts/stop-all.sh       # 停止所有服务
+./scripts/status.sh         # 查看服务状态
+./scripts/smoke-test.sh     # 冒烟测试
+./scripts/start-dev-tunnel.sh  # 启动开发隧道
+```
 
 ---
 
@@ -1888,6 +1936,34 @@ curl -fsS \
 
 这是 `nohup` 启动后台进程时的正常提示，不是服务启动失败。
 
+## vLLM sleep mode 在 ROCm 上的已知问题
+
+在当前 ROCm 7.2 + vLLM 0.20.0 环境下，`--enable-sleep-mode` 的 `wake_up` 调用可能失败：
+
+```text
+Exception: Call to wake_up method failed: CUDA Error: invalid argument
+    at /app/vllm/csrc/cumem_allocator.cpp:187
+```
+
+临时解决方案：去掉 `--enable-sleep-mode` 参数启动 vLLM。W7900 48GB 显存足够同时容纳 Qwen3.5-9B (FP16, ~18GB) 和 ComfyUI Z-Image Turbo (~6GB)。
+
+已修复：`start-all.sh` 和 `scripts/smoke-test.sh` 不再依赖 `--enable-sleep-mode`。
+
+## 候选图卡在 generating_candidates
+
+原因：`PosterStatusPartialReady` 曾被错误地放入 `ReconcilePoster` 的终态跳过列表，导致 1 张候选图就绪后，剩余候选图的 reconciliation 停止。
+
+修复：将 `PartialReady` 从跳过列表移除，使其回退到继续 reconciliation 剩余候选图。
+
+```text
+// 修复前：PartialReady 在跳过列表中 → reconciler 停止
+case PosterStatusPartialReady:  // ← 被跳过！
+
+// 修复后：PartialReady 继续 reconciliation
+case PosterStatusPartialReady:
+    // 继续 reconciliation 剩余候选图
+```
+
 ---
 
 # 18. 安全说明
@@ -2033,18 +2109,19 @@ rm -f \
 只有以下条件全部通过，才视为完成复现：
 
 ```text
-[ ] ROCm 识别 gfx1100
-[ ] ComfyUI 在 127.0.0.1:8188 可访问
-[ ] vLLM 在 127.0.0.1:8001 返回 stageposter-vlm
-[ ] Backend /health 返回 HTTP 200
-[ ] /api/system/dependencies 返回 healthy
-[ ] AI Session 返回 3 个设计方案
-[ ] 确认方案后生成 3 张候选图
-[ ] 候选图可以被选择
-[ ] Go 确定性最终海报合成成功
-[ ] Finalize 返回 succeeded 或 completed_with_warnings
-[ ] 最终海报和 Thumbnail 可下载
-[ ] Quick Tunnel 公网健康检查通过
+[✓] ROCm 识别 gfx1100
+[✓] ComfyUI 在 127.0.0.1:8188 可访问
+[✓] vLLM 在 127.0.0.1:8001 返回 stageposter-vlm
+[✓] Backend /health 返回 HTTP 200
+[✓] /api/system/dependencies 返回 healthy
+[✓] AI Session 返回 3 个设计方案
+[✓] 确认方案后生成 3 张候选图
+[✓] 候选图可以被选择
+[✓] Go 确定性最终海报合成成功
+[✓] Finalize 返回 succeeded 或 completed_with_warnings
+[✓] 最终海报和 Thumbnail 可下载
+[✓] Quick Tunnel 公网健康检查通过
+[✓] 冒烟测试 (scripts/smoke-test.sh) 全部通过
 ```
 
 StagePoster 只有在用户能够下载一张可用的最终海报时，才算在产品边界上完成。单次模型调用成功不等于产品完成。

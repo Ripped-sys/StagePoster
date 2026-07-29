@@ -6,11 +6,22 @@ BACKEND_ROOT="$(
   pwd
 )"
 
-ENV_FILE="${ENV_FILE:-$BACKEND_ROOT/.env}"
+PROJECT_ROOT="$BACKEND_ROOT"
+ENV_FILE="${ENV_FILE:-}"
 
-if [[ ! -f "$ENV_FILE" ]]; then
-  echo "Missing $ENV_FILE" >&2
-  exit 1
+# Support both backend/.env (legacy) and project root .env
+if [[ -z "$ENV_FILE" ]]; then
+  if [[ -f "$BACKEND_ROOT/.env" ]]; then
+    ENV_FILE="$BACKEND_ROOT/.env"
+  elif [[ -f "$PROJECT_ROOT/.env" ]]; then
+    ENV_FILE="$PROJECT_ROOT/.env"
+  else
+    echo "Missing .env file. Looked in:" >&2
+    echo "  $BACKEND_ROOT/.env" >&2
+    echo "  $PROJECT_ROOT/.env" >&2
+    echo "Copy .env.example to .env and edit it first." >&2
+    exit 1
+  fi
 fi
 
 set -a

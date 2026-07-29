@@ -348,6 +348,85 @@ func (r *Repository) ListCandidates(
 	return candidates, rows.Err()
 }
 
+func (r *Repository) GetCandidate(
+	ctx context.Context,
+	posterID string,
+	candidateID string,
+) (domain.CandidateRecord, error) {
+	row := r.db.QueryRowContext(
+		ctx,
+		`
+		SELECT
+			id,
+			poster_id,
+			job_id,
+			variant_index,
+			variant_key,
+			variant_name,
+			spec_json,
+			compiled_prompt,
+			seed,
+			attempt,
+			status,
+			passed,
+			selected,
+			error_message,
+			created_at,
+			updated_at
+		FROM poster_candidates
+		WHERE poster_id = ? AND id = ?
+		`,
+		posterID,
+		candidateID,
+	)
+
+	var candidate domain.CandidateRecord
+	var errorMessage sql.NullString
+	var createdAt string
+	var updatedAt string
+
+	if err := row.Scan(
+		&candidate.ID,
+		&candidate.PosterID,
+		&candidate.JobID,
+		&candidate.VariantIndex,
+		&candidate.VariantKey,
+		&candidate.VariantName,
+		&candidate.SpecJSON,
+		&candidate.CompiledPrompt,
+		&candidate.Seed,
+		&candidate.Attempt,
+		&candidate.Status,
+		&candidate.Passed,
+		&candidate.Selected,
+		&errorMessage,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.CandidateRecord{}, ErrNotFound
+		}
+		return domain.CandidateRecord{}, fmt.Errorf(
+			"get candidate: %w",
+			err,
+		)
+	}
+
+	candidate.ErrorMessage = errorMessage.String
+
+	var err error
+	candidate.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return domain.CandidateRecord{}, err
+	}
+	candidate.UpdatedAt, err = parseTime(updatedAt)
+	if err != nil {
+		return domain.CandidateRecord{}, err
+	}
+
+	return candidate, nil
+}
+
 func (r *Repository) UpdatePosterStatus(
 	ctx context.Context,
 	posterID string,
@@ -540,13 +619,14 @@ func (r *Repository) ListActivePosters(
 			updated_at,
 			completed_at
 		FROM poster_requests
-		WHERE status IN (?, ?, ?, ?, ?)
+		WHERE status IN (?, ?, ?, ?, ?, ?)
 		ORDER BY created_at ASC
 		LIMIT ?
 		`,
 		domain.PosterStatusPlanning,
 		domain.PosterStatusGenerating,
 		domain.PosterStatusValidating,
+		domain.PosterStatusPartialReady,
 		domain.PosterStatusSelected,
 		domain.PosterStatusComposing,
 		limit,

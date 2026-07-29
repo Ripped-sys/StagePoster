@@ -139,6 +139,13 @@ func assetResponse(
 		Width:        asset.Width,
 		Height:       asset.Height,
 		ContentURL:   "/api/assets/" + asset.ID + "/content",
+		ProcessStatus:  asset.ProcessStatus,
+		ProcessError:   asset.ProcessError,
+		ProcessedAt:    asset.ProcessedAt,
+		MaskPath:       asset.MaskPath,
+		AnalysisJSON:   asset.AnalysisJSON,
+		DominantColors: asset.DominantColors,
+		ProcessVersion: asset.ProcessVersion,
 		CreatedAt:    asset.CreatedAt,
 	}
 }

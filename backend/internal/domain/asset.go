@@ -10,6 +10,8 @@ const (
 	AssetKindReference AssetKind = "reference"
 )
 
+const AssetProcessVersion = "v1"
+
 func (kind AssetKind) Valid() bool {
 	switch kind {
 	case AssetKindPerson,
@@ -21,6 +23,33 @@ func (kind AssetKind) Valid() bool {
 	}
 }
 
+type AssetProcessStatus string
+
+const (
+	AssetProcessStatusPending    AssetProcessStatus = "pending"
+	AssetProcessStatusProcessing AssetProcessStatus = "processing"
+	AssetProcessStatusReady      AssetProcessStatus = "ready"
+	AssetProcessStatusFailed     AssetProcessStatus = "failed"
+)
+
+type ProcessingStepStatus string
+
+const (
+	ProcessingStepStatusPending    ProcessingStepStatus = "pending"
+	ProcessingStepStatusProcessing ProcessingStepStatus = "processing"
+	ProcessingStepStatusCompleted  ProcessingStepStatus = "completed"
+	ProcessingStepStatusFailed     ProcessingStepStatus = "failed"
+	ProcessingStepStatusSkipped    ProcessingStepStatus = "skipped"
+)
+
+type ProcessingStep struct {
+	Name        string               `json:"name"`
+	Status      ProcessingStepStatus `json:"status"`
+	Error       string               `json:"error,omitempty"`
+	StartedAt   *time.Time           `json:"startedAt,omitempty"`
+	CompletedAt *time.Time           `json:"completedAt,omitempty"`
+}
+
 type Asset struct {
 	ID           string    `json:"assetId"`
 	Kind         AssetKind `json:"kind"`
@@ -30,9 +59,20 @@ type Asset struct {
 	SizeBytes    int64     `json:"sizeBytes"`
 	SHA256       string    `json:"sha256"`
 	StoragePath  string    `json:"-"`
-	Width        int       `json:"width"`
-	Height       int       `json:"height"`
-	CreatedAt    time.Time `json:"createdAt"`
+
+	Width  int `json:"width"`
+	Height int `json:"height"`
+
+	// Processing state
+	ProcessStatus  AssetProcessStatus `json:"processStatus"`
+	ProcessError   string             `json:"processError,omitempty"`
+	ProcessedAt    *time.Time         `json:"processedAt,omitempty"`
+	MaskPath       string             `json:"maskPath,omitempty"`
+	AnalysisJSON   string             `json:"analysisJson,omitempty"`
+	DominantColors []string           `json:"dominantColors,omitempty"`
+	ProcessVersion string             `json:"processVersion,omitempty"`
+
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type AssetResponse struct {
@@ -43,10 +83,20 @@ type AssetResponse struct {
 	MimeType     string    `json:"mimeType"`
 	SizeBytes    int64     `json:"sizeBytes"`
 	SHA256       string    `json:"sha256"`
+	ContentURL   string    `json:"contentUrl"`
 	Width        int       `json:"width"`
 	Height       int       `json:"height"`
-	ContentURL   string    `json:"contentUrl"`
-	CreatedAt    time.Time `json:"createdAt"`
+
+	// Processing state
+	ProcessStatus  AssetProcessStatus `json:"processStatus"`
+	ProcessError   string             `json:"processError,omitempty"`
+	ProcessedAt    *time.Time         `json:"processedAt,omitempty"`
+	MaskPath       string             `json:"maskPath,omitempty"`
+	AnalysisJSON   string             `json:"analysisJson,omitempty"`
+	DominantColors []string           `json:"dominantColors,omitempty"`
+	ProcessVersion string             `json:"processVersion,omitempty"`
+
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type AssetListResponse struct {

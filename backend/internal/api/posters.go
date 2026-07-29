@@ -159,35 +159,58 @@ func (s *Server) handlePosterRoute(
 			posterID,
 			segments[2],
 		)
- case len(segments) == 2 &&
-	segments[1] == "review" &&
-	request.Method == http.MethodPost:
+	case len(segments) == 2 &&
+		segments[1] == "review" &&
+		request.Method == http.MethodPost:
 
-	s.handlePosterReview(
-		writer,
-		request,
-		posterID,
-	)
+		s.handlePosterReview(
+			writer,
+			request,
+			posterID,
+		)
 
-case len(segments) == 2 &&
-	segments[1] == "reviews" &&
-	request.Method == http.MethodGet:
+	case len(segments) == 2 &&
+		segments[1] == "reviews" &&
+		request.Method == http.MethodGet:
 
-	s.handlePosterReviews(
-		writer,
-		request,
-		posterID,
-	)
+		s.handlePosterReviews(
+			writer,
+			request,
+			posterID,
+		)
 
-case len(segments) == 2 &&
-	segments[1] == "timeline" &&
-	request.Method == http.MethodGet:
+	case len(segments) == 2 &&
+		segments[1] == "timeline" &&
+		request.Method == http.MethodGet:
 
-	s.handlePosterTimeline(
-		writer,
-		request,
-		posterID,
-	)
+		s.handlePosterTimeline(
+			writer,
+			request,
+			posterID,
+		)
+
+	case len(segments) == 2 &&
+		segments[1] == "cancel" &&
+		request.Method == http.MethodPost:
+
+		s.handlePosterCancel(
+			writer,
+			request,
+			posterID,
+		)
+
+	case len(segments) == 4 &&
+		segments[1] == "candidates" &&
+		segments[3] == "retry" &&
+		request.Method == http.MethodPost:
+
+		s.handleCandidateRetry(
+			writer,
+			request,
+			posterID,
+			segments[2],
+		)
+
 	default:
 		writeError(
 			writer,
@@ -420,4 +443,96 @@ func (s *Server) handlePosterResult(
 
 	writer.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(writer, result.Body)
+}
+
+func (s *Server) handlePosterCancel(
+	writer http.ResponseWriter,
+	request *http.Request,
+	posterID string,
+) {
+	ctx, cancel := contextWithTimeout(
+		request,
+		30*time.Second,
+	)
+	defer cancel()
+
+	err := s.posterFlow.Cancel(ctx, posterID)
+
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		writeError(
+			writer,
+			http.StatusNotFound,
+			"poster not found",
+		)
+		return
+
+	case err != nil:
+		writeError(
+			writer,
+			http.StatusInternalServerError,
+			err.Error(),
+		)
+		return
+	}
+
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"posterId": posterID,
+		"status":   "canceled",
+	})
+}
+
+func (s *Server) handleCandidateRetry(
+	writer http.ResponseWriter,
+	request *http.Request,
+	posterID string,
+	candidateID string,
+) {
+	ctx, cancel := contextWithTimeout(
+		request,
+		60*time.Second,
+	)
+	defer cancel()
+
+	result, err := s.posterFlow.RetryCandidate(
+		ctx,
+		posterID,
+		candidateID,
+	)
+
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		writeError(
+			writer,
+			http.StatusNotFound,
+			"poster or candidate not found",
+		)
+		return
+
+	case errors.Is(err, posterflow.ErrCandidateNotReady):
+		writeError(
+			writer,
+			http.StatusConflict,
+			err.Error(),
+		)
+		return
+
+	case errors.Is(err, posterflow.ErrPosterNotSelectable):
+		writeError(
+			writer,
+			http.StatusConflict,
+			err.Error(),
+		)
+		return
+
+	case err != nil:
+		writeError(
+			writer,
+			http.StatusInternalServerError,
+			err.Error(),
+		)
+		return
+	}
+
+	writeJSON(writer, http.StatusOK, result)
 }

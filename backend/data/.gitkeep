@@ -1,0 +1,4 @@
+# This file exists solely to preserve the backend/data/ directory in git.
+# The SQLite database files (poster.db, poster.db-shm, poster.db-wal) are
+# runtime artifacts and are gitignored in .gitignore, but the directory
+# itself must exist so the service can open the database on startup.

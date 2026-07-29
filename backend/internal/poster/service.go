@@ -527,7 +527,8 @@ func (s *Service) ReconcilePoster(
 	switch posterRecord.Status {
 	case domain.PosterStatusAwaitingSelection,
 		domain.PosterStatusSucceeded,
-		domain.PosterStatusFailed:
+		domain.PosterStatusFailed,
+		domain.PosterStatusCanceled:
 		return nil
 
 	case domain.PosterStatusSelected,
@@ -536,6 +537,9 @@ func (s *Service) ReconcilePoster(
 			ctx,
 			posterRecord,
 		)
+
+	case domain.PosterStatusPartialReady:
+		// Continue reconciling remaining candidates below
 	}
 
 	var goal domain.GoalContract
@@ -698,6 +702,19 @@ func (s *Service) ReconcilePoster(
 
 		return nil
 
+	case readyCount > 0:
+		// 部分候选就绪，前端可立即查看已完成的候选图。
+		if err := s.repository.UpdatePosterStatus(
+			ctx,
+			posterID,
+			domain.PosterStatusPartialReady,
+			"",
+		); err != nil {
+			return err
+		}
+
+		return nil
+
 	case readyCount+failedCount == len(candidates) &&
 		failedCount > 0:
 		return s.repository.UpdatePosterStatus(
@@ -762,6 +779,160 @@ func (s *Service) retryCandidate(
 		nextSeed,
 		nextAttempt,
 	)
+}
+
+func (s *Service) Cancel(
+	ctx context.Context,
+	posterID string,
+) error {
+	posterID = strings.TrimSpace(posterID)
+
+	if posterID == "" {
+		return repository.ErrNotFound
+	}
+
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
+
+	posterRecord, err := s.repository.GetPoster(
+		ctx,
+		posterID,
+	)
+	if err != nil {
+		return err
+	}
+
+	switch posterRecord.Status {
+	case domain.PosterStatusSucceeded,
+		domain.PosterStatusFailed,
+		domain.PosterStatusCanceled:
+		return nil
+	}
+
+	candidates, err := s.repository.ListCandidates(
+		ctx,
+		posterID,
+	)
+	if err != nil {
+		return err
+	}
+
+	for _, candidate := range candidates {
+		if candidate.JobID != "" {
+			job, jobErr := s.core.Status(ctx, candidate.JobID)
+			if jobErr == nil && job.PromptID != "" {
+				_ = s.core.CancelPrompt(ctx, job.PromptID)
+			}
+
+			_ = s.core.CancelJob(ctx, candidate.JobID)
+		}
+	}
+
+	_ = s.core.ReleaseComfyMemory(ctx)
+
+	return s.repository.UpdatePosterStatus(
+		ctx,
+		posterID,
+		domain.PosterStatusCanceled,
+		"cancelled by user",
+	)
+}
+
+func (s *Service) RetryCandidate(
+	ctx context.Context,
+	posterID string,
+	candidateID string,
+) (domain.PosterResponse, error) {
+	posterID = strings.TrimSpace(posterID)
+	candidateID = strings.TrimSpace(candidateID)
+
+	if posterID == "" || candidateID == "" {
+		return domain.PosterResponse{}, repository.ErrNotFound
+	}
+
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
+
+	posterRecord, err := s.repository.GetPoster(
+		ctx,
+		posterID,
+	)
+	if err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	switch posterRecord.Status {
+	case domain.PosterStatusAwaitingSelection,
+		domain.PosterStatusPartialReady,
+		domain.PosterStatusGenerating:
+		// 允许重试
+
+	case domain.PosterStatusSucceeded,
+		domain.PosterStatusFailed,
+		domain.PosterStatusCanceled:
+		return domain.PosterResponse{},
+			fmt.Errorf(
+				"%w: cannot retry candidate for %s poster",
+				ErrPosterNotSelectable,
+				posterRecord.Status,
+			)
+
+	default:
+		return domain.PosterResponse{},
+			fmt.Errorf(
+				"%w: current status is %s",
+				ErrPosterNotSelectable,
+				posterRecord.Status,
+			)
+	}
+
+	candidate, err := s.repository.GetCandidate(
+		ctx,
+		posterID,
+		candidateID,
+	)
+	if err != nil {
+		return domain.PosterResponse{}, err
+	}
+
+	if candidate.Status != domain.CandidateStatusFailed {
+		return domain.PosterResponse{},
+			fmt.Errorf(
+				"%w: candidate is not failed",
+				ErrCandidateNotReady,
+			)
+	}
+
+	var goal domain.GoalContract
+
+	if err := json.Unmarshal(
+		[]byte(posterRecord.GoalJSON),
+		&goal,
+	); err != nil {
+		return domain.PosterResponse{}, fmt.Errorf(
+			"decode poster goal contract: %w",
+			err,
+		)
+	}
+
+	retryErr := s.retryCandidate(
+		ctx,
+		candidate,
+		goal,
+		candidate.ErrorMessage,
+	)
+	if retryErr != nil {
+		return domain.PosterResponse{}, retryErr
+	}
+
+	_ = s.repository.UpdatePosterStatus(
+		ctx,
+		posterID,
+		domain.PosterStatusGenerating,
+		"",
+	)
+
+	return s.Get(ctx, posterID)
 }
 
 func marshalJSON(value any) (string, error) {

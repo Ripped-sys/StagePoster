@@ -38,6 +38,15 @@ func NewPosterReconciler(
 func (r *PosterReconciler) Run(
 	ctx context.Context,
 ) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			r.logger.Printf(
+				"POSTER RECONCILER PANIC (will not restart): %v",
+				rec,
+			)
+		}
+	}()
+
 	r.runOnce(ctx)
 
 	ticker := time.NewTicker(r.interval)
@@ -49,7 +58,17 @@ func (r *PosterReconciler) Run(
 			return
 
 		case <-ticker.C:
-			r.runOnce(ctx)
+			func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						r.logger.Printf(
+							"POSTER RECONCILER TICK PANIC: %v",
+							rec,
+						)
+					}
+				}()
+				r.runOnce(ctx)
+			}()
 		}
 	}
 }

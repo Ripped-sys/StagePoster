@@ -319,6 +319,36 @@ func (r *Repository) MarkFailed(
 	return requireAffected(result)
 }
 
+func (r *Repository) MarkCanceled(
+	ctx context.Context,
+	jobID string,
+	message string,
+	completedAt time.Time,
+) error {
+	result, err := r.db.ExecContext(
+		ctx,
+		`
+		UPDATE jobs
+		SET
+			status = ?,
+			error_message = ?,
+			completed_at = ?,
+			updated_at = ?
+		WHERE id = ?
+		`,
+		domain.JobStatusCanceled,
+		message,
+		formatTime(completedAt),
+		formatTime(completedAt),
+		jobID,
+	)
+	if err != nil {
+		return fmt.Errorf("mark job canceled: %w", err)
+	}
+
+	return requireAffected(result)
+}
+
 func (r *Repository) CompleteJob(
 	ctx context.Context,
 	jobID string,

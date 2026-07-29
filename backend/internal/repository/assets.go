@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/Ripped-sys/StagePoster/backend/internal/domain"
 )
@@ -29,6 +31,15 @@ func (r *Repository) MigrateAssets(
 			width INTEGER NOT NULL DEFAULT 0,
 			height INTEGER NOT NULL DEFAULT 0,
 
+			-- Processing state
+			process_status TEXT NOT NULL DEFAULT 'pending',
+			process_error TEXT,
+			processed_at TEXT,
+			mask_path TEXT,
+			analysis_json TEXT,
+			dominant_colors TEXT,
+			process_version TEXT,
+
 			created_at TEXT NOT NULL
 		)
 		`,
@@ -44,6 +55,10 @@ func (r *Repository) MigrateAssets(
 		CREATE INDEX IF NOT EXISTS idx_assets_sha256
 		ON assets(sha256)
 		`,
+		`
+		CREATE INDEX IF NOT EXISTS idx_assets_process_status
+		ON assets(process_status, created_at DESC)
+		`,
 	}
 
 	for _, statement := range statements {
@@ -52,6 +67,29 @@ func (r *Repository) MigrateAssets(
 				"run assets migration: %w",
 				err,
 			)
+		}
+	}
+
+	// Migrate existing table if it lacks the new columns (idempotent).
+	alterStatements := []string{
+		"ALTER TABLE assets ADD COLUMN process_status TEXT NOT NULL DEFAULT 'pending'",
+		"ALTER TABLE assets ADD COLUMN process_error TEXT",
+		"ALTER TABLE assets ADD COLUMN processed_at TEXT",
+		"ALTER TABLE assets ADD COLUMN mask_path TEXT",
+		"ALTER TABLE assets ADD COLUMN analysis_json TEXT",
+		"ALTER TABLE assets ADD COLUMN dominant_colors TEXT",
+		"ALTER TABLE assets ADD COLUMN process_version TEXT",
+	}
+
+	for _, stmt := range alterStatements {
+		if _, err := r.db.ExecContext(ctx, stmt); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column") &&
+				!strings.Contains(err.Error(), "already exists") {
+				return fmt.Errorf(
+					"alter assets table: %w",
+					err,
+				)
+			}
 		}
 	}
 
@@ -76,9 +114,16 @@ func (r *Repository) CreateAsset(
 			storage_path,
 			width,
 			height,
+			process_status,
+			process_error,
+			processed_at,
+			mask_path,
+			analysis_json,
+			dominant_colors,
+			process_version,
 			created_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 		asset.ID,
 		asset.Kind,
@@ -90,6 +135,13 @@ func (r *Repository) CreateAsset(
 		asset.StoragePath,
 		asset.Width,
 		asset.Height,
+		asset.ProcessStatus,
+		nullableString(asset.ProcessError),
+		formatOptionalTime(asset.ProcessedAt),
+		nullableString(asset.MaskPath),
+		nullableString(asset.AnalysisJSON),
+		strings.Join(asset.DominantColors, ","),
+		nullableString(asset.ProcessVersion),
 		formatTime(asset.CreatedAt),
 	)
 	if err != nil {
@@ -117,6 +169,13 @@ func (r *Repository) GetAsset(
 			storage_path,
 			width,
 			height,
+			process_status,
+			process_error,
+			processed_at,
+			mask_path,
+			analysis_json,
+			dominant_colors,
+			process_version,
 			created_at
 		FROM assets
 		WHERE id = ?
@@ -162,6 +221,13 @@ func (r *Repository) ListAssets(
 			storage_path,
 			width,
 			height,
+			process_status,
+			process_error,
+			processed_at,
+			mask_path,
+			analysis_json,
+			dominant_colors,
+			process_version,
 			created_at
 		FROM assets
 		ORDER BY created_at DESC
@@ -201,9 +267,52 @@ func (r *Repository) ListAssets(
 	return assets, nil
 }
 
+func (r *Repository) UpdateAssetProcessStatus(
+	ctx context.Context,
+	assetID string,
+	status domain.AssetProcessStatus,
+	processError string,
+	processedAt *time.Time,
+	maskPath string,
+	analysisJSON string,
+) error {
+	result, err := r.db.ExecContext(
+		ctx,
+		`
+		UPDATE assets
+		SET
+			process_status = ?,
+			process_error = ?,
+			processed_at = ?,
+			mask_path = ?,
+			analysis_json = ?,
+			process_version = ?
+		WHERE id = ?
+		`,
+		status,
+		nullableString(processError),
+		formatOptionalTime(processedAt),
+		nullableString(maskPath),
+		nullableString(analysisJSON),
+		domain.AssetProcessVersion,
+		assetID,
+	)
+	if err != nil {
+		return fmt.Errorf("update asset process status: %w", err)
+	}
+
+	return requireAffected(result)
+}
+
 func scanAsset(source scanner) (domain.Asset, error) {
 	var asset domain.Asset
 	var createdAt string
+	var processError sql.NullString
+	var processedAt sql.NullString
+	var maskPath sql.NullString
+	var analysisJSON sql.NullString
+	var dominantColors sql.NullString
+	var processVersion sql.NullString
 
 	err := source.Scan(
 		&asset.ID,
@@ -216,10 +325,33 @@ func scanAsset(source scanner) (domain.Asset, error) {
 		&asset.StoragePath,
 		&asset.Width,
 		&asset.Height,
+		&asset.ProcessStatus,
+		&processError,
+		&processedAt,
+		&maskPath,
+		&analysisJSON,
+		&dominantColors,
+		&processVersion,
 		&createdAt,
 	)
 	if err != nil {
 		return domain.Asset{}, err
+	}
+
+	asset.ProcessError = processError.String
+	asset.MaskPath = maskPath.String
+	asset.AnalysisJSON = analysisJSON.String
+	asset.ProcessVersion = processVersion.String
+
+	if processedAt.Valid && processedAt.String != "" {
+		parsed, parseErr := parseTime(processedAt.String)
+		if parseErr == nil {
+			asset.ProcessedAt = &parsed
+		}
+	}
+
+	if dominantColors.Valid && dominantColors.String != "" {
+		asset.DominantColors = strings.Split(dominantColors.String, ",")
 	}
 
 	asset.CreatedAt, err = parseTime(createdAt)

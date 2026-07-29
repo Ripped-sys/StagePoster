@@ -36,6 +36,15 @@ func NewReconciler(
 }
 
 func (r *Reconciler) Run(ctx context.Context) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			r.logger.Printf(
+				"RECONCILER PANIC (will not restart): %v",
+				rec,
+			)
+		}
+	}()
+
 	r.runOnce(ctx)
 
 	ticker := time.NewTicker(r.interval)
@@ -47,7 +56,17 @@ func (r *Reconciler) Run(ctx context.Context) {
 			return
 
 		case <-ticker.C:
-			r.runOnce(ctx)
+			func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						r.logger.Printf(
+							"RECONCILER TICK PANIC: %v",
+							rec,
+						)
+					}
+				}()
+				r.runOnce(ctx)
+			}()
 		}
 	}
 }

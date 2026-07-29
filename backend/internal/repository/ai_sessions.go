@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Ripped-sys/StagePoster/backend/internal/domain"
@@ -30,7 +31,7 @@ func (r *Repository) MigrateAISessions(
 
 			FOREIGN KEY(poster_id)
 				REFERENCES poster_requests(id)
-				ON DELETE SET NULL
+			ON DELETE SET NULL
 		)
 		`,
 		`
@@ -47,7 +48,7 @@ func (r *Repository) MigrateAISessions(
 
 			FOREIGN KEY(session_id)
 				REFERENCES ai_sessions(id)
-				ON DELETE CASCADE
+			ON DELETE CASCADE
 		)
 		`,
 		`
@@ -61,15 +62,19 @@ func (r *Repository) MigrateAISessions(
 			purpose TEXT NOT NULL,
 			created_at TEXT NOT NULL,
 
+			used_in_stage TEXT DEFAULT '',
+			actually_used INTEGER NOT NULL DEFAULT 0,
+			usage_note TEXT,
+
 			PRIMARY KEY(session_id, asset_id),
 
 			FOREIGN KEY(session_id)
 				REFERENCES ai_sessions(id)
-				ON DELETE CASCADE,
+			ON DELETE CASCADE,
 
 			FOREIGN KEY(asset_id)
 				REFERENCES assets(id)
-				ON DELETE CASCADE
+			ON DELETE CASCADE
 		)
 		`,
 		`
@@ -88,7 +93,7 @@ func (r *Repository) MigrateAISessions(
 
 			FOREIGN KEY(session_id)
 				REFERENCES ai_sessions(id)
-				ON DELETE CASCADE
+			ON DELETE CASCADE
 		)
 		`,
 		`
@@ -106,6 +111,25 @@ func (r *Repository) MigrateAISessions(
 				"run AI session migration: %w",
 				err,
 			)
+		}
+	}
+
+	// Migrate existing table if it lacks the new columns (idempotent).
+	alterStatements := []string{
+		"ALTER TABLE ai_session_assets ADD COLUMN used_in_stage TEXT DEFAULT ''",
+		"ALTER TABLE ai_session_assets ADD COLUMN actually_used INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE ai_session_assets ADD COLUMN usage_note TEXT",
+	}
+
+	for _, stmt := range alterStatements {
+		if _, err := r.db.ExecContext(ctx, stmt); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column") &&
+				!strings.Contains(err.Error(), "already exists") {
+				return fmt.Errorf(
+					"alter ai_session_assets: %w",
+					err,
+				)
+			}
 		}
 	}
 
@@ -413,6 +437,10 @@ func (r *Repository) ListAISessionAssets(
 			a.height,
 			a.storage_path,
 
+			sa.used_in_stage,
+			sa.actually_used,
+			sa.usage_note,
+
 			sa.created_at
 		FROM ai_session_assets sa
 		JOIN assets a ON a.id = sa.asset_id
@@ -434,6 +462,8 @@ func (r *Repository) ListAISessionAssets(
 	for rows.Next() {
 		var asset domain.AISessionAssetRecord
 		var createdAt string
+		var usedInStage sql.NullString
+		var usageNote sql.NullString
 
 		if err := rows.Scan(
 			&asset.SessionID,
@@ -445,12 +475,23 @@ func (r *Repository) ListAISessionAssets(
 			&asset.Width,
 			&asset.Height,
 			&asset.StoragePath,
+			&usedInStage,
+			&asset.ActuallyUsed,
+			&usageNote,
 			&createdAt,
 		); err != nil {
 			return nil, fmt.Errorf(
 				"scan AI session asset: %w",
 				err,
 			)
+		}
+
+		if usedInStage.Valid && usedInStage.String != "" {
+			asset.UsedInStage = strings.Split(usedInStage.String, ",")
+		}
+
+		if usageNote.Valid {
+			asset.UsageNote = usageNote.String
 		}
 
 		asset.CreatedAt, err = parseTime(createdAt)

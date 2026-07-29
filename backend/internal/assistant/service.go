@@ -1111,7 +1111,8 @@ func sessionStatusForPoster(
 ) domain.AISessionStatus {
 	switch status {
 	case domain.PosterStatusPlanning,
-		domain.PosterStatusGenerating:
+		domain.PosterStatusGenerating,
+		domain.PosterStatusPartialReady:
 		return domain.AISessionStatusGeneratingCandidates
 
 	case domain.PosterStatusAwaitingSelection:

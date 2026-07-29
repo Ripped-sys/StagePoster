@@ -31,8 +31,10 @@ type Server struct {
 	aiURL     string
 	aiModel   string
 
-	apiToken   string
-	corsOrigin string
+	apiToken       string
+	corsOrigin     string
+	assetProcessor *service.AssetProcessor
+	healthCollector *service.HealthCollector
 }
 
 func NewServer(
@@ -53,6 +55,20 @@ func NewServer(
 		apiToken:     apiToken,
 		corsOrigin:   corsOrigin,
 	}
+}
+
+func (s *Server) WithAssetProcessor(
+	processor *service.AssetProcessor,
+) *Server {
+	s.assetProcessor = processor
+	return s
+}
+
+func (s *Server) WithHealthCollector(
+	collector *service.HealthCollector,
+) *Server {
+	s.healthCollector = collector
+	return s
 }
 
 func (s *Server) Handler() http.Handler {
@@ -109,6 +125,13 @@ func (s *Server) handleHealth(
 				"error":  err.Error(),
 			},
 		)
+		return
+	}
+
+	if s.healthCollector != nil {
+		info := s.healthCollector.Collect(ctx)
+		info.TokenRequired = s.apiToken != ""
+		writeJSON(writer, http.StatusOK, info)
 		return
 	}
 

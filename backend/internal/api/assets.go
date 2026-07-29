@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ripped-sys/StagePoster/backend/internal/domain"
 	"github.com/Ripped-sys/StagePoster/backend/internal/repository"
 	"github.com/Ripped-sys/StagePoster/backend/internal/service"
 	"github.com/Ripped-sys/StagePoster/backend/internal/storage"
@@ -67,6 +69,18 @@ func (s *Server) handleAsset(
 		assetID = strings.Trim(assetID, "/")
 
 		s.handleAssetContent(
+			writer,
+			request,
+			assetID,
+		)
+		return
+	}
+
+	if strings.HasSuffix(path, "/process") {
+		assetID := strings.TrimSuffix(path, "/process")
+		assetID = strings.Trim(assetID, "/")
+
+		s.handleAssetProcess(
 			writer,
 			request,
 			assetID,
@@ -175,6 +189,18 @@ func (s *Server) handleAssetUpload(
 			err.Error(),
 		)
 		return
+	}
+
+	// Enqueue async processing for the uploaded asset.
+	if s.assetProcessor != nil {
+		go func(assetID string, assetKind string) {
+			processCtx := context.Background()
+			_ = s.assetProcessor.Enqueue(
+				processCtx,
+				assetID,
+				domain.AssetKind(assetKind),
+			)
+		}(result.ID, kind)
 	}
 
 	writeJSON(writer, http.StatusCreated, result)
@@ -298,4 +324,94 @@ func (s *Server) handleAssetContent(
 
 	writer.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(writer, result.Body)
+}
+
+func (s *Server) handleAssetProcess(
+	writer http.ResponseWriter,
+	request *http.Request,
+	assetID string,
+) {
+	ctx, cancel := contextWithTimeout(
+		request,
+		20*time.Second,
+	)
+	defer cancel()
+
+	result, err := s.assetService.Get(ctx, assetID)
+
+	if errors.Is(err, repository.ErrNotFound) {
+		writeError(
+			writer,
+			http.StatusNotFound,
+			"asset not found",
+		)
+		return
+	}
+
+	if err != nil {
+		writeError(
+			writer,
+			http.StatusInternalServerError,
+			err.Error(),
+		)
+		return
+	}
+
+	steps := make([]domain.ProcessingStep, 0)
+
+	switch result.Kind {
+	case domain.AssetKindLogo:
+		steps = append(steps, domain.ProcessingStep{
+			Name:   "background_removal",
+			Status: processingStepStatus(result.ProcessStatus),
+		}, domain.ProcessingStep{
+			Name:   "mask_generation",
+			Status: processingStepStatus(result.ProcessStatus),
+		})
+
+	case domain.AssetKindPerson:
+		steps = append(steps, domain.ProcessingStep{
+			Name:   "background_removal",
+			Status: processingStepStatus(result.ProcessStatus),
+		}, domain.ProcessingStep{
+			Name:   "mask_generation",
+			Status: processingStepStatus(result.ProcessStatus),
+		})
+
+	case domain.AssetKindReference:
+		steps = append(steps, domain.ProcessingStep{
+			Name:   "color_analysis",
+			Status: processingStepStatus(result.ProcessStatus),
+		}, domain.ProcessingStep{
+			Name:   "composition_analysis",
+			Status: processingStepStatus(result.ProcessStatus),
+		})
+	}
+
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"assetId":       result.ID,
+		"processStatus": result.ProcessStatus,
+		"processError":  result.ProcessError,
+		"processedAt":   result.ProcessedAt,
+		"maskPath":      result.MaskPath,
+		"analysisJson":  result.AnalysisJSON,
+		"dominantColors": result.DominantColors,
+		"processVersion": result.ProcessVersion,
+		"steps":         steps,
+	})
+}
+
+func processingStepStatus(
+	assetStatus domain.AssetProcessStatus,
+) domain.ProcessingStepStatus {
+	switch assetStatus {
+	case domain.AssetProcessStatusProcessing:
+		return domain.ProcessingStepStatusProcessing
+	case domain.AssetProcessStatusReady:
+		return domain.ProcessingStepStatusCompleted
+	case domain.AssetProcessStatusFailed:
+		return domain.ProcessingStepStatusFailed
+	default:
+		return domain.ProcessingStepStatusPending
+	}
 }

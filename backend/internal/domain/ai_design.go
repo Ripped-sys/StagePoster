@@ -16,6 +16,7 @@ type DesignPlan struct {
 	PositivePrompt   string            `json:"positivePrompt"`
 	NegativePrompt   string            `json:"negativePrompt"`
 	ComposerTemplate string            `json:"composerTemplate"`
+	Controls         *GenerationControl `json:"controls,omitempty"`
 }
 
 type DesignAgentResult struct {

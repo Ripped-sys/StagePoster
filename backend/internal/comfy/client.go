@@ -328,3 +328,72 @@ func (c *Client) OpenImage(
 
 	return response, nil
 }
+
+func (c *Client) CancelPrompt(
+	ctx context.Context,
+	promptID string,
+) error {
+	payload, err := json.Marshal(
+		map[string]string{
+			"prompt_id": promptID,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"marshal ComfyUI cancel request: %w",
+			err,
+		)
+	}
+
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		c.baseURL+"/interrupt",
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"create ComfyUI cancel request: %w",
+			err,
+		)
+	}
+
+	request.Header.Set(
+		"Content-Type",
+		"application/json",
+	)
+
+	response, err := c.http.Do(request)
+	if err != nil {
+		return fmt.Errorf(
+			"request ComfyUI cancel: %w",
+			err,
+		)
+	}
+	defer response.Body.Close()
+
+	body, readErr := io.ReadAll(
+		io.LimitReader(
+			response.Body,
+			64*1024,
+		),
+	)
+	if readErr != nil {
+		return fmt.Errorf(
+			"read ComfyUI cancel response: %w",
+			readErr,
+		)
+	}
+
+	if response.StatusCode < 200 ||
+		response.StatusCode >= 300 {
+
+		return fmt.Errorf(
+			"ComfyUI /interrupt returned HTTP %d: %s",
+			response.StatusCode,
+			strings.TrimSpace(string(body)),
+		)
+	}
+
+	return nil
+}

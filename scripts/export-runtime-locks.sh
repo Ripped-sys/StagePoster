@@ -6,7 +6,17 @@ BACKEND_ROOT="$(
   pwd
 )"
 
-ENV_FILE="${ENV_FILE:-$BACKEND_ROOT/.env}"
+PROJECT_ROOT="$BACKEND_ROOT"
+ENV_FILE="${ENV_FILE:-}"
+
+# Support both backend/.env (legacy) and project root .env
+if [[ -z "$ENV_FILE" ]]; then
+  if [[ -f "$BACKEND_ROOT/.env" ]]; then
+    ENV_FILE="$BACKEND_ROOT/.env"
+  elif [[ -f "$PROJECT_ROOT/.env" ]]; then
+    ENV_FILE="$PROJECT_ROOT/.env"
+  fi
+fi
 
 if [[ -f "$ENV_FILE" ]]; then
   set -a

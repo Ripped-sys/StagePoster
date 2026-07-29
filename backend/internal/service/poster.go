@@ -105,6 +105,39 @@ func (s *PosterService) ReleaseComfyMemory(
 	)
 }
 
+func (s *PosterService) CancelPrompt(
+	ctx context.Context,
+	promptID string,
+) error {
+	return s.client.CancelPrompt(ctx, promptID)
+}
+
+func (s *PosterService) CancelJob(
+	ctx context.Context,
+	jobID string,
+) error {
+	job, err := s.repository.GetJob(ctx, jobID)
+	if err != nil {
+		return err
+	}
+
+	if job.Status == domain.JobStatusQueued ||
+		job.Status == domain.JobStatusRunning {
+		if job.ComfyPromptID != "" {
+			_ = s.client.CancelPrompt(ctx, job.ComfyPromptID)
+		}
+
+		_ = s.repository.MarkCanceled(
+			ctx,
+			jobID,
+			"cancelled by poster cancellation",
+			time.Now().UTC(),
+		)
+	}
+
+	return nil
+}
+
 func (s *PosterService) Bindings() comfy.Bindings {
 	return s.template.Bindings()
 }
