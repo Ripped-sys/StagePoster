@@ -399,7 +399,7 @@ func writeJSON(
 ) {
 	writer.Header().Set(
 		"Content-Type",
-		"application/json",
+		"application/json; charset=utf-8",
 	)
 
 	writer.WriteHeader(status)

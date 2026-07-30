@@ -313,6 +313,31 @@ func (s *Service) OpenFinalResult(
 	ctx context.Context,
 	posterID string,
 ) (ComposedFile, error) {
+	return s.openOutput(
+		ctx,
+		posterID,
+		domain.PosterOutputKindFinal,
+	)
+}
+
+// OpenThumbnail 服务 PosterResponse 里那个 thumbnailUrl。合成阶段一直在写
+// 缩略图文件和 poster_outputs 记录，只是从来没有路由把它读出来。
+func (s *Service) OpenThumbnail(
+	ctx context.Context,
+	posterID string,
+) (ComposedFile, error) {
+	return s.openOutput(
+		ctx,
+		posterID,
+		domain.PosterOutputKindThumbnail,
+	)
+}
+
+func (s *Service) openOutput(
+	ctx context.Context,
+	posterID string,
+	kind string,
+) (ComposedFile, error) {
 	posterRecord, err := s.repository.GetPoster(
 		ctx,
 		posterID,
@@ -328,7 +353,7 @@ func (s *Service) OpenFinalResult(
 	output, err := s.repository.GetPosterOutput(
 		ctx,
 		posterID,
-		domain.PosterOutputKindFinal,
+		kind,
 	)
 	if err != nil {
 		return ComposedFile{}, err

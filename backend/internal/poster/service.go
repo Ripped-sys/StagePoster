@@ -276,7 +276,14 @@ func (s *Service) Get(
 			Status:      candidate.Status,
 			Attempt:     candidate.Attempt,
 			Selected:    candidate.Selected,
+			Seed:        candidate.Seed,
 			Error:       candidate.ErrorMessage,
+		}
+
+		if spec, ok := decodeCandidateSpec(
+			candidate.SpecJSON,
+		); ok {
+			item.Spec = &spec
 		}
 
 		if candidate.Status == domain.CandidateStatusReady {
@@ -945,4 +952,25 @@ func marshalJSON(value any) (string, error) {
 	}
 
 	return string(raw), nil
+}
+
+// decodeCandidateSpec 把落库的 spec JSON 还原成结构体，供 API 响应使用。
+// 历史记录可能为空或格式不兼容，这类情况静默跳过而不是让整个查询失败。
+func decodeCandidateSpec(
+	raw string,
+) (domain.CandidateSpec, bool) {
+	if strings.TrimSpace(raw) == "" {
+		return domain.CandidateSpec{}, false
+	}
+
+	var spec domain.CandidateSpec
+
+	if err := json.Unmarshal(
+		[]byte(raw),
+		&spec,
+	); err != nil {
+		return domain.CandidateSpec{}, false
+	}
+
+	return spec, true
 }
