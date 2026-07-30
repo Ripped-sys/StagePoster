@@ -3,10 +3,12 @@ import { ArrowLeft, ArrowRight, MousePointer2, MoveHorizontal } from 'lucide-rea
 import PosterCard from './PosterCard';
 import CategoryFilter from './CategoryFilter';
 import { posters, type PosterCategory } from '../data/posters';
+import type {PosterLanguage} from '../types';
 
 type FilterKey = 'all' | PosterCategory;
 
-export default function PosterGallery() {
+export default function PosterGallery({language}: {language: PosterLanguage}) {
+  const english = language === 'en';
   const sectionRef = useRef<HTMLElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState<FilterKey>('all');
@@ -122,17 +124,17 @@ export default function PosterGallery() {
   };
 
   return (
-    <section ref={sectionRef} className="gallery" id="gallery" aria-label="Poster Gallery">
+    <section ref={sectionRef} className="gallery" id="stories" aria-label="Poster Gallery">
       <header className="gallery-head">
         <div>
           <small>Visual Archive · 03</small>
           <h2>
-            From Reality <span>to Poster</span>
+            {english ? <>From Reality <span>to Poster</span></> : <>从真实素材 <span>到海报</span></>}
           </h2>
           <p className="gallery-lead">
-            Explore AI-generated visuals created from real people, places, and stories.
+            {english ? 'Explore AI-generated visuals created from real people, places, and stories.' : '探索由真实人物、地点与故事生成的 AI 视觉作品。'}
           </p>
-          <p className="gallery-lead-zh">从真实素材到视觉世界</p>
+          <p className="gallery-lead-zh">{english ? '从真实素材到视觉世界' : 'REAL MATERIALS · REAL STORIES · NEW VISUALS'}</p>
         </div>
         <div className="gallery-head-side">
           <span className="gallery-counter">
@@ -163,8 +165,8 @@ export default function PosterGallery() {
           ))}
           {/* Spacer for right breathing room + a "see more" tail card */}
           <a className="gallery-tail" href="/create">
-            <span>继续创作</span>
-            <b>Generate your own</b>
+            <span>{english ? 'CREATE YOUR OWN' : '继续创作'}</span>
+            <b>{english ? 'Generate your own' : '生成你的视觉'}</b>
             <i />
           </a>
           <div className="gallery-spacer" aria-hidden="true" />

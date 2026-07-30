@@ -379,3 +379,5 @@
   .story-card figcaption b{font-size:18px}
   .landing-studio-footer-inner{grid-template-columns:1fr;gap:18px;padding:48px 22px 40px}
 }
+.landing-language-switch{position:fixed;top:20px;right:clamp(175px,10vw,230px);z-index:100}.landing-language-switch .poster-language-toggle{margin:0;background:#090a11e8;backdrop-filter:blur(12px)}
+@media(max-width:760px){.landing-language-switch{top:68px;right:12px}.landing-language-switch .poster-language-toggle>span{display:none}}
