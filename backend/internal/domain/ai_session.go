@@ -14,15 +14,32 @@ const (
 	AISessionStatusCompletedWithWarnings      AISessionStatus = "completed_with_warnings"
 	AISessionStatusSucceeded                  AISessionStatus = "succeeded"
 	AISessionStatusFailed                     AISessionStatus = "failed"
-	AISessionStatusCancelled                  AISessionStatus = "cancelled"
+	AISessionStatusCanceled                   AISessionStatus = "canceled"
 )
 
+// AISessionStatusLegacyCanceled 是 2026-07 之前写进库的英式拼写。
+// 线上值已统一成单 l 的 "canceled"（与 PosterStatusCanceled / JobStatusCanceled
+// 一致），但 NFS 上的旧会话行还带着双 l。读取时归一化，否则一个已取消的会话
+// 会因为常量对不上而被 Terminal() 判成仍在进行。
+const AISessionStatusLegacyCanceled AISessionStatus = "cancelled"
+
+// NormalizeAISessionStatus 把旧拼写折叠到当前线上值。
+func NormalizeAISessionStatus(
+	status AISessionStatus,
+) AISessionStatus {
+	if status == AISessionStatusLegacyCanceled {
+		return AISessionStatusCanceled
+	}
+
+	return status
+}
+
 func (status AISessionStatus) Terminal() bool {
-	switch status {
+	switch NormalizeAISessionStatus(status) {
 	case AISessionStatusSucceeded,
 		AISessionStatusCompletedWithWarnings,
 		AISessionStatusFailed,
-		AISessionStatusCancelled:
+		AISessionStatusCanceled:
 		return true
 
 	default:

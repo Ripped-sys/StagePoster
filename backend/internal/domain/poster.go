@@ -89,6 +89,7 @@ type CandidateSpec struct {
 	VariantName string   `json:"variantName"`
 	Motif       string   `json:"motif"`
 	Composition string   `json:"composition"`
+	Camera      string   `json:"camera,omitempty"`
 	Materials   []string `json:"materials"`
 	Palette     []string `json:"palette"`
 	Lighting    string   `json:"lighting"`
@@ -136,6 +137,8 @@ type CandidateResponse struct {
 	Attempt     int             `json:"attempt"`
 	Selected    bool            `json:"selected"`
 	ImageURL    string          `json:"imageUrl,omitempty"`
+	Spec        *CandidateSpec  `json:"spec,omitempty"`
+	Seed        int64           `json:"seed,omitempty"`
 	Error       string          `json:"error,omitempty"`
 }
 

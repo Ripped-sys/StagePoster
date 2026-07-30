@@ -116,7 +116,6 @@ start_vllm() {
         --gpu-memory-utilization "${VLLM_GPU_MEMORY_UTILIZATION:-0.65}" \
         --limit-mm-per-prompt '{"image":{"count":1,"width":768,"height":1152},"video":0}' \
         --enforce-eager \
-        --enable-sleep-mode \
         --default-chat-template-kwargs '{"enable_thinking":false}' \
         --generation-config vllm \
         > "$BACKEND_ROOT/logs/vllm.log" 2>&1 &
@@ -130,13 +129,11 @@ start_vllm() {
     180 \
     "$VLM_API_KEY"
 
-  curl -fsS \
-    -X POST \
-    -H "Authorization: Bearer $VLM_API_KEY" \
-    "${VLM_URL:-http://127.0.0.1:8001}/sleep?level=1" \
-    >/dev/null || true
-
-  echo "VLM sleep requested."
+  # 不再请求睡眠。ROCm 7.2 + vLLM 0.20.0 上 --enable-sleep-mode 会让后续的
+  # wake_up 死在 CUDA Error: invalid argument (cumem_allocator.cpp:187)，
+  # 结果是所有 AI 接口在第一次调用之后全部 502。见 CLAUDE.md §7。
+  # 代价是 vLLM 常驻显存；gpu-memory-utilization 0.65 给 ComfyUI 留出余量。
+  echo "VLM resident (sleep mode disabled on ROCm)."
 }
 
 start_comfyui() {

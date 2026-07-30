@@ -260,6 +260,13 @@ func (runtime *Runtime) Suspend(
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 
+	// autoSleep=false 必须是真正的总开关。ROCm 7.2 + vLLM 0.20.0 上睡眠之后
+	// wake_up 会死在 CUDA Error: invalid argument，之后每个 AI 接口都是 502。
+	// Acquire 的 release 已经尊重这个开关，Suspend 以前却绕过它。
+	if !runtime.autoSleep {
+		return nil
+	}
+
 	sleeping, err := runtime.client.IsSleeping(ctx)
 	if err != nil {
 		return fmt.Errorf(

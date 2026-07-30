@@ -10,6 +10,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
+	"golang.org/x/image/font/sfnt"
 	"golang.org/x/image/math/fixed"
 	_ "golang.org/x/image/webp"
 )
@@ -83,13 +85,20 @@ func New(
 	}, nil
 }
 
+// cjkProbeRunes 是中文渲染的探针字符。Go 内置字体（goregular/gobold）
+// 完全没有 CJK 字形，缺字时 opentype 会静默画成空白或豆腐块，
+// 因此显式配置了字体路径时必须先验证覆盖率，缺字直接报错而不是静默出错图。
+var cjkProbeRunes = []rune{'海', '演', '场', '票'}
+
 func loadFont(
 	path string,
 	fallback []byte,
 ) (*opentype.Font, error) {
+	path = strings.TrimSpace(path)
+
 	data := fallback
 
-	if strings.TrimSpace(path) != "" {
+	if path != "" {
 		loaded, err := os.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf(
@@ -102,15 +111,107 @@ func loadFont(
 		data = loaded
 	}
 
-	parsed, err := opentype.Parse(data)
+	parsed, err := parseFontData(data)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"parse font: %w",
+			"parse font %s: %w",
+			fontLabel(path),
 			err,
 		)
 	}
 
+	if path == "" {
+		return parsed, nil
+	}
+
+	if missing, err := missingCJKRune(parsed); err != nil {
+		return nil, fmt.Errorf(
+			"probe font %s: %w",
+			path,
+			err,
+		)
+	} else if missing != 0 {
+		return nil, fmt.Errorf(
+			"font %s has no glyph for %q: configure a CJK font such as /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+			path,
+			missing,
+		)
+	}
+
 	return parsed, nil
+}
+
+// parseFontData 同时接受单体字体和 .ttc 字体集合。Noto Sans CJK
+// 在 Debian/Ubuntu 上只以 .ttc 形式分发，opentype.Parse 无法直接读取。
+func parseFontData(
+	data []byte,
+) (*opentype.Font, error) {
+	if parsed, err := opentype.Parse(data); err == nil {
+		return parsed, nil
+	}
+
+	collection, err := opentype.ParseCollection(data)
+	if err != nil {
+		return nil, err
+	}
+
+	if collection.NumFonts() == 0 {
+		return nil, errors.New(
+			"font collection is empty",
+		)
+	}
+
+	var buffer sfnt.Buffer
+
+	// 优先取简体中文（SC）字面，否则退回集合中的第一个。
+	for index := 0; index < collection.NumFonts(); index++ {
+		candidate, err := collection.Font(index)
+		if err != nil {
+			continue
+		}
+
+		name, err := candidate.Name(
+			&buffer,
+			sfnt.NameIDFamily,
+		)
+		if err != nil {
+			continue
+		}
+
+		if strings.Contains(name, "SC") {
+			return candidate, nil
+		}
+	}
+
+	return collection.Font(0)
+}
+
+// missingCJKRune 返回第一个没有字形的探针字符，全部命中时返回 0。
+func missingCJKRune(
+	parsed *opentype.Font,
+) (rune, error) {
+	var buffer sfnt.Buffer
+
+	for _, probe := range cjkProbeRunes {
+		index, err := parsed.GlyphIndex(&buffer, probe)
+		if err != nil {
+			return 0, err
+		}
+
+		if index == 0 {
+			return probe, nil
+		}
+	}
+
+	return 0, nil
+}
+
+func fontLabel(path string) string {
+	if path == "" {
+		return "(builtin fallback)"
+	}
+
+	return path
 }
 
 func (c *Composer) Compose(
@@ -164,10 +265,17 @@ func (c *Composer) Compose(
 		return domain.ComposeResult{}, err
 	}
 
-	c.drawTopOverlay(canvas)
-
 	adjustments := normalizeCompositionAdjustments(
 		input.Adjustments,
+	)
+
+	// 压暗强度要按底图算，所以得先知道标题落在哪一条带上。
+	c.drawTopOverlay(
+		canvas,
+		titleBandRect(
+			canvas.Bounds(),
+			adjustments.TitleOffsetRatio,
+		),
 	)
 
 	panelTop := int(
@@ -519,23 +627,183 @@ func drawInformationBackground(
 	)
 }
 
-func (c *Composer) drawTopOverlay(
+// 上部压暗的目标亮度。白字压在这个亮度上对比度约 6.3:1，过 WCAG AA。
+const (
+	titleScrimTargetLuminance = 96.0
+	titleScrimBaseAlpha       = 190.0
+	titleScrimMaxAlpha        = 245.0
+)
+
+// titleBandRect 返回 drawTitle 用来居中的那个盒子。两处必须共用同一套
+// 常数，否则压暗的区域和真正写字的区域会错开。
+func titleBandRect(
+	bounds image.Rectangle,
+	offsetRatio float64,
+) image.Rectangle {
+	height := bounds.Dy()
+
+	top := 48 +
+		int(float64(height)*offsetRatio)
+
+	bottom := top +
+		int(float64(height)*0.15)
+
+	if bottom > height {
+		bottom = height
+	}
+
+	return image.Rect(
+		bounds.Min.X,
+		top,
+		bounds.Max.X,
+		bottom,
+	)
+}
+
+// brightLuminance 取区域亮度的 90 分位而不是均值。均值会被大片暗部拉低，
+// 于是一块过曝的天空照样能把白标题吃掉——正是要防的那种情况。
+func brightLuminance(
 	canvas *image.NRGBA,
-) {
-	height := int(
-		float64(canvas.Bounds().Dy()) * 0.24,
+	band image.Rectangle,
+) float64 {
+	band = band.Intersect(canvas.Bounds())
+
+	if band.Empty() {
+		return 0
+	}
+
+	var histogram [256]int
+
+	total := 0
+
+	for y := band.Min.Y; y < band.Max.Y; y++ {
+		for x := band.Min.X; x < band.Max.X; x++ {
+			pixel := canvas.NRGBAAt(x, y)
+
+			value := (299*int(pixel.R) +
+				587*int(pixel.G) +
+				114*int(pixel.B)) / 1000
+
+			histogram[value]++
+			total++
+		}
+	}
+
+	if total == 0 {
+		return 0
+	}
+
+	cutoff := total * 90 / 100
+	seen := 0
+
+	for value := 0; value < 256; value++ {
+		seen += histogram[value]
+
+		if seen >= cutoff {
+			return float64(value)
+		}
+	}
+
+	return 255
+}
+
+type topOverlayShape struct {
+	Height    int
+	HoldUntil int
+	PeakAlpha float64
+}
+
+// planTopOverlay 按底图实际亮度决定压暗形状。
+//
+// 底图本来就暗时返回原来的纯线性渐变，输出逐字节不变。底图偏亮时改成
+// “标题盒子内维持恒定 alpha、盒子下方再淡出”——纯线性渐变到盒子底边
+// 已经衰减得压不住过曝天空了，靠调高峰值是补不回来的。
+func planTopOverlay(
+	canvas *image.NRGBA,
+	band image.Rectangle,
+) topOverlayShape {
+	bounds := canvas.Bounds()
+
+	shape := topOverlayShape{
+		Height: int(
+			float64(bounds.Dy()) * 0.24,
+		),
+		PeakAlpha: titleScrimBaseAlpha,
+	}
+
+	if shape.Height <= 0 {
+		return shape
+	}
+
+	source := brightLuminance(canvas, band)
+
+	if source <= titleScrimTargetLuminance {
+		return shape
+	}
+
+	// 黑色蒙版叠加后 L' = L * (1 - alpha/255)，据此反解需要多少 alpha。
+	// 向上取整：alpha 最终会被截断成 uint8，截断会让结果差一档亮度。
+	required := math.Ceil(
+		(1 - titleScrimTargetLuminance/source) * 255,
 	)
 
-	if height <= 0 {
+	if required > titleScrimMaxAlpha {
+		required = titleScrimMaxAlpha
+	}
+
+	delivered := 0.0
+
+	if band.Max.Y < shape.Height {
+		delivered = shape.PeakAlpha *
+			(1 - float64(band.Max.Y)/
+				float64(shape.Height))
+	}
+
+	if delivered >= required {
+		return shape
+	}
+
+	shape.PeakAlpha = required
+	shape.HoldUntil = band.Max.Y
+
+	shape.Height = shape.HoldUntil +
+		int(float64(bounds.Dy())*0.10)
+
+	if shape.Height > bounds.Dy() {
+		shape.Height = bounds.Dy()
+	}
+
+	return shape
+}
+
+func (c *Composer) drawTopOverlay(
+	canvas *image.NRGBA,
+	band image.Rectangle,
+) {
+	shape := planTopOverlay(canvas, band)
+
+	if shape.Height <= 0 {
 		return
 	}
 
-	for y := 0; y < height; y++ {
-		ratio := 1 -
-			float64(y)/
-				float64(height)
+	for y := 0; y < shape.Height; y++ {
+		alpha := shape.PeakAlpha
 
-		alpha := uint8(190 * ratio)
+		if y > shape.HoldUntil {
+			span := float64(
+				shape.Height - shape.HoldUntil,
+			)
+
+			if span > 0 {
+				alpha = shape.PeakAlpha *
+					(1 - float64(y-shape.HoldUntil)/
+						span)
+			}
+		}
+
+		if alpha < 0 {
+			alpha = 0
+		}
 
 		stdDraw.Draw(
 			canvas,
@@ -550,7 +818,7 @@ func (c *Composer) drawTopOverlay(
 					R: 0,
 					G: 0,
 					B: 0,
-					A: alpha,
+					A: uint8(alpha),
 				},
 			),
 			image.Point{},

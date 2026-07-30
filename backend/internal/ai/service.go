@@ -24,8 +24,9 @@ Important generation constraints:
 - The generated key visual must contain no readable text.
 - Do not generate letters, words, captions, logos, signage or watermarks.
 - StagePoster will add exact event text later through deterministic composition.
-- Reserve a clean upper area for the title.
-- Reserve a low-detail lower area for event information.
+- Keep the upper region of the frame low in detail, with a soft tonal gradient in the same color family as the artwork. Never a flat white panel, white box or blank rectangle.
+- Keep the lower region of the frame the same way: quiet, low in detail, same color family.
+- Never describe these regions as a title area, caption area or information area. Describe them only as quiet, low-detail bands.
 - positivePrompt and negativePrompt must be written in English.
 
 Use exactly this schema:
@@ -387,16 +388,25 @@ func NormalizeDesignResult(
 				"bottom_22_percent"
 		}
 
+		// 安全区不能是纯白色块。这两句会被原样拼进发给 ComfyUI 的
+		// 正向词，措辞必须和 poster 包里的约束保持一致——包括刻意不提
+		// title / information，那两个词会让模型自己往里写字。
 		plan.PositivePrompt =
 			appendPromptFragment(
 				plan.PositivePrompt,
-				"clean empty upper title area",
+				"upper region kept low in detail with soft tonal gradient in the same color family as the artwork",
 			)
 
 		plan.PositivePrompt =
 			appendPromptFragment(
 				plan.PositivePrompt,
-				"low-detail lower information area",
+				"lower region kept low in detail with quiet tonal background in the same color family",
+			)
+
+		plan.PositivePrompt =
+			appendPromptFragment(
+				plan.PositivePrompt,
+				"no flat white panels",
 			)
 
 		negativeFragments := []string{
@@ -404,11 +414,16 @@ func NormalizeDesignResult(
 			"letters",
 			"words",
 			"typography",
+			"chinese characters",
+			"CJK glyphs",
 			"caption",
 			"logo",
 			"watermark",
 			"signage",
 			"gibberish",
+			"solid white panel",
+			"blank white rectangle",
+			"white box",
 		}
 
 		for _, fragment := range negativeFragments {

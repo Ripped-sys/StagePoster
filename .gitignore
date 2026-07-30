@@ -61,13 +61,15 @@ ComfyUI/
 
 # ---- 5. StagePoster 运行时：NFS 持久化目录 ------------------------------------
 # 数据已迁移到 /workspace/persistence/stageposter/（NFS）
-# 本地 backend/data/ 仅保留 .gitkeep 占位，不再存放实际数据
-# data/*.db
-# data/*.db-shm
-# data/*.db-wal
-# backend/data/*.db
-# backend/data/*.db-shm
-# backend/data/*.db-wal
+# 本地 backend/data/ 仅保留 .gitkeep 占位，不再存放实际数据。
+# 规则保留启用：迁移前的旧库仍可能残留在本地，而 SQLite 库属于运行时数据，
+# 一旦提交进仓库就会带上真实的活动记录。
+data/*.db
+data/*.db-shm
+data/*.db-wal
+backend/data/*.db
+backend/data/*.db-shm
+backend/data/*.db-wal
 
 
 # ---- 6. StagePoster 运行时：日志 ---------------------------------------------

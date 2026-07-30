@@ -58,7 +58,7 @@ func (s *Service) Finalize(
 		// 合成已完成，可以进入质量闭环。
 
 	case domain.AISessionStatusFailed,
-		domain.AISessionStatusCancelled:
+		domain.AISessionStatusCanceled:
 		return domain.AISessionResponse{},
 			ErrSessionTerminal
 

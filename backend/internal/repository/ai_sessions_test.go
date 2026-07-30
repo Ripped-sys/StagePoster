@@ -207,3 +207,93 @@ func TestAISessionPersistence(
 		t.Fatal("expected selected plan")
 	}
 }
+
+// 库里已经有一批 status='cancelled' 的旧行。迁移要把它们改成单 l，
+// 读取侧也要兜住——否则已取消的会话在 API 里显示成仍在进行。
+func TestAISessionLegacyCanceledSpelling(
+	t *testing.T,
+) {
+	ctx := context.Background()
+
+	repositoryInstance, err := OpenSQLite(
+		ctx,
+		filepath.Join(
+			t.TempDir(),
+			"stageposter-legacy.db",
+		),
+	)
+	if err != nil {
+		t.Fatalf("OpenSQLite error: %v", err)
+	}
+	defer repositoryInstance.Close()
+
+	now := time.Now().UTC()
+
+	session := domain.AISessionRecord{
+		ID:        "session_legacy",
+		Status:    domain.AISessionStatusCollectingBrief,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := repositoryInstance.CreateAISession(
+		ctx,
+		session,
+	); err != nil {
+		t.Fatalf("CreateAISession error: %v", err)
+	}
+
+	// 模拟旧二进制写下的行。
+	if _, err := repositoryInstance.db.ExecContext(
+		ctx,
+		`UPDATE ai_sessions SET status = ? WHERE id = ?`,
+		string(domain.AISessionStatusLegacyCanceled),
+		session.ID,
+	); err != nil {
+		t.Fatalf("seed legacy status: %v", err)
+	}
+
+	// 读取侧归一化：迁移还没再跑，Get 也必须返回单 l。
+	stored, err := repositoryInstance.GetAISession(
+		ctx,
+		session.ID,
+	)
+	if err != nil {
+		t.Fatalf("GetAISession error: %v", err)
+	}
+
+	if stored.Status != domain.AISessionStatusCanceled {
+		t.Fatalf(
+			"read path did not normalize: %q",
+			stored.Status,
+		)
+	}
+
+	if !stored.Status.Terminal() {
+		t.Fatal("canceled session must be terminal")
+	}
+
+	// 迁移是幂等的，并且真的改了落库的值。
+	if err := repositoryInstance.MigrateAISessions(
+		ctx,
+	); err != nil {
+		t.Fatalf("MigrateAISessions error: %v", err)
+	}
+
+	var raw string
+
+	if err := repositoryInstance.db.QueryRowContext(
+		ctx,
+		`SELECT status FROM ai_sessions WHERE id = ?`,
+		session.ID,
+	).Scan(&raw); err != nil {
+		t.Fatalf("read raw status: %v", err)
+	}
+
+	if raw != string(domain.AISessionStatusCanceled) {
+		t.Fatalf(
+			"migration left stored status as %q",
+			raw,
+		)
+	}
+}
