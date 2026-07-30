@@ -4,6 +4,8 @@ import {toPng} from 'html-to-image';
 import type {Participant, PosterProject, UploadedAsset} from '../types';
 import {absoluteAIImageUrl, aiSessionApi, type AISession, type AISessionBrief, type BackendHealth} from '../services/aiSessionApi';
 import AssetUpload from './AssetUpload';
+import PosterLanguageToggle from './PosterLanguageToggle';
+import {localizedPosterCopy} from '../utils/posterLanguage';
 
 export type ProjectDraft = Partial<Omit<PosterProject, 'bands'>> & {bands?: Participant[]};
 
@@ -238,6 +240,7 @@ export default function ProjectAssistant({project, onApply}: {
   };
 
   const finalUrl = absoluteAIImageUrl(session?.poster?.resultUrl);
+  const posterCopy = localizedPosterCopy(project);
   const selectedCandidate = candidates.find((candidate) => candidate.selected)
     ?? candidates.find((candidate) => candidate.candidateId === session?.poster?.selectedCandidateId);
   const selectedVisualUrl = absoluteAIImageUrl(selectedCandidate?.imageUrl);
@@ -407,15 +410,16 @@ export default function ProjectAssistant({project, onApply}: {
     {session?.reviewSummary?.warning && actions.includes('finalize') && <button className="ghost-button assistant-retry" disabled={busy} onClick={() => run(() => aiSessionApi.retryFinalize(session.sessionId))}><RefreshCw/> 安全重试审查</button>}
     {finalUrl && <section className="assistant-final">
       <header><b>发布版海报</b><span>真实信息程序化叠加</span></header>
+      <PosterLanguageToggle value={posterCopy.language} onChange={(language) => onApply({posterLanguage: language})}/>
       {selectedVisualUrl && <div className="session-publish-poster" ref={publishRef}>
         <img className="session-publish-visual" src={selectedVisualUrl} alt="选中的 AI 主视觉"/>
         <div className="session-publish-shade"/>
         <div className="session-publish-copy">
           <small>POSTER VISUAL LAB · AI KEY VISUAL</small>
-          <h2>{project.title || session?.brief.event.title}</h2>
-          <p>{project.theme || session?.brief.visual.theme}</p>
-          <div className="session-publish-bands">{project.bands.map((band) => <span key={band.id}>{band.logo?.dataUrl ? <img src={band.logo.dataUrl} alt={`${band.name} Logo`}/> : <b>{band.name}</b>}</span>)}</div>
-          <dl><div><dt>DATE / TIME</dt><dd>{project.dateTime || `${session?.brief.event.date ?? ''} ${session?.brief.event.time ?? ''}`}</dd></div><div><dt>VENUE</dt><dd>{project.venue || session?.brief.event.venue}</dd></div>{project.price && <div><dt>TICKET</dt><dd>{project.price}</dd></div>}</dl>
+          <h2>{posterCopy.title || session?.brief.event.title}</h2>
+          <p>{posterCopy.theme || session?.brief.visual.theme}</p>
+          <div className="session-publish-bands">{posterCopy.bands.map((band) => <span key={band.id}>{band.logo?.dataUrl ? <img src={band.logo.dataUrl} alt={`${band.displayName} Logo`}/> : <b>{band.displayName}</b>}</span>)}</div>
+          <dl><div><dt>{posterCopy.labels.date}</dt><dd>{project.dateTime || `${session?.brief.event.date ?? ''} ${session?.brief.event.time ?? ''}`}</dd></div><div><dt>{posterCopy.labels.venue}</dt><dd>{[posterCopy.city, posterCopy.venue].filter(Boolean).join(' · ') || session?.brief.event.venue}</dd></div>{project.price && <div><dt>{posterCopy.labels.ticket}</dt><dd>{project.price}</dd></div>}</dl>
           {project.assets.qr?.dataUrl && <img className="session-publish-qr" src={project.assets.qr.dataUrl} alt="购票二维码"/>}
         </div>
       </div>}

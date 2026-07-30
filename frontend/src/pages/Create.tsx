@@ -13,6 +13,7 @@ import {
 import Brand from "../components/Brand";
 import AssetUpload from "../components/AssetUpload";
 import ProjectAssistant from "../components/ProjectAssistant";
+import PosterLanguageToggle from "../components/PosterLanguageToggle";
 import { demoProject, emptyProject, styles } from "../data/mock";
 import { useStore } from "../store";
 import type { Participant, PosterProject, SceneType } from "../types";
@@ -276,6 +277,15 @@ export default function Create() {
                   error={errors.venue}
                 />
               </div>
+              <h2>英文主视觉文案 <small className="optional-copy">可选 · 留空时沿用中文原文</small></h2>
+              <div className="fields two bilingual-fields">
+                <Field label="活动名称 / TITLE" value={project.titleEn ?? ""} onChange={(v) => set("titleEn", v)} />
+                <Field label="活动主体 / SUBJECT" value={project.subjectEn ?? ""} onChange={(v) => set("subjectEn", v)} />
+                <Field label="活动主题 / TAGLINE" value={project.themeEn ?? ""} onChange={(v) => set("themeEn", v)} />
+                <Field label="城市 / CITY" value={project.cityEn ?? ""} onChange={(v) => set("cityEn", v)} />
+                <Field label="地点 / VENUE" value={project.venueEn ?? ""} onChange={(v) => set("venueEn", v)} />
+                <Field label="票务说明 / TICKET INFO" value={project.ticketInfoEn ?? ""} onChange={(v) => set("ticketInfoEn", v)} />
+              </div>
               <div className="uploads two">
                 <AssetUpload
                   label="场地照片"
@@ -327,6 +337,16 @@ export default function Create() {
                             label="音乐风格"
                             value={b.genre}
                             onChange={(v) => updateBand(b.id, { genre: v })}
+                          />
+                          <Field
+                            label="乐队英文名 / BAND NAME"
+                            value={b.nameEn ?? ""}
+                            onChange={(v) => updateBand(b.id, { nameEn: v })}
+                          />
+                          <Field
+                            label="英文音乐风格 / GENRE"
+                            value={b.genreEn ?? ""}
+                            onChange={(v) => updateBand(b.id, { genreEn: v })}
                           />
                         </div>
                         <div className="uploads three">
@@ -464,6 +484,10 @@ export default function Create() {
             <div className="form-section">
               <p className="eyebrow">STEP 04 / OUTPUT</p>
               <h1>选择要交付的内容</h1>
+              <PosterLanguageToggle
+                value={project.posterLanguage ?? "en"}
+                onChange={(language) => set("posterLanguage", language)}
+              />
               <div className="outputs">
                 <label className="selected">
                   <input type="checkbox" checked readOnly />

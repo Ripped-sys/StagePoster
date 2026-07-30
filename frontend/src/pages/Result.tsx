@@ -14,11 +14,14 @@ import { toPng } from "html-to-image";
 import AssetUpload from "../components/AssetUpload";
 import Brand from "../components/Brand";
 import PosterPreview from "../components/PosterPreview";
+import PosterLanguageToggle from "../components/PosterLanguageToggle";
 import { posterApi } from "../services/posterApi";
 import { useStore } from "../store";
 import type { Participant, PosterProject } from "../types";
+import { localizedPosterCopy } from "../utils/posterLanguage";
 
 async function renderRemotePublishPng(project: PosterProject, imageUrl: string) {
+  const copy = localizedPosterCopy(project);
   const canvas = document.createElement("canvas");
   canvas.width = 1024;
   canvas.height = 1536;
@@ -47,22 +50,22 @@ async function renderRemotePublishPng(project: PosterProject, imageUrl: string) 
   context.fillText("POSTER VISUAL LAB · AMD ROCm", pad, 96);
   context.fillStyle = "#ffffff";
   context.font = "800 74px Arial, Microsoft YaHei";
-  const title = project.title || "未命名计划";
+  const title = copy.title;
   context.fillText(title.slice(0, 18), pad, 190);
   context.fillStyle = "#f1dccd";
   context.font = "400 24px Arial, Microsoft YaHei";
-  context.fillText((project.theme || "让真实信息，成为视觉的一部分").slice(0, 40), pad, 236);
+  context.fillText(copy.theme.slice(0, 40), pad, 236);
   context.strokeStyle = "rgba(255,255,255,.55)";
   context.beginPath(); context.moveTo(pad, 1190); context.lineTo(canvas.width - pad, 1190); context.stroke();
   context.fillStyle = "#ffffff";
   context.font = "800 34px Arial, Microsoft YaHei";
-  context.fillText(project.bands.map((band) => band.name).join("  ·  ").slice(0, 34) || project.subject || "表演者", pad, 1270);
-  const columns = [["DATE / TIME", project.dateTime], ["VENUE", [project.city, project.venue].filter(Boolean).join(" · ")], ["TICKET", project.price || project.ticketInfo]];
+  context.fillText(copy.bands.map((band) => band.displayName).join("  ·  ").slice(0, 34) || copy.subject, pad, 1270);
+  const columns = [[copy.labels.date, project.dateTime], [copy.labels.venue, [copy.city, copy.venue].filter(Boolean).join(" · ")], [copy.labels.ticket, project.price || copy.ticketInfo]];
   const columnWidth = (canvas.width - pad * 2) / columns.length;
   columns.forEach(([label, value], index) => {
     const x = pad + columnWidth * index;
     context.fillStyle = "#ff784d"; context.font = "700 16px Arial"; context.fillText(label, x, 1340);
-    context.fillStyle = "#ffffff"; context.font = "700 24px Arial, Microsoft YaHei"; context.fillText(String(value || "待确认").slice(0, 24), x, 1380);
+    context.fillStyle = "#ffffff"; context.font = "700 24px Arial, Microsoft YaHei"; context.fillText(String(value || copy.labels.pending).slice(0, 24), x, 1380);
   });
   return await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("海报导出失败")), "image/png");
@@ -136,6 +139,7 @@ export default function Result() {
         </button>
       </main>
     );
+  const posterCopy = localizedPosterCopy(project);
   const set = <K extends keyof PosterProject>(
     key: K,
     value: PosterProject[K],
@@ -217,6 +221,10 @@ export default function Result() {
       </nav>
       <div className="result-layout">
         <section className="result-canvas">
+          <PosterLanguageToggle
+            value={posterCopy.language}
+            onChange={(language) => set("posterLanguage", language)}
+          />
           <div className="result-status">
             <CheckCircle2 /> 生成完成{" "}
             <span>
@@ -228,13 +236,13 @@ export default function Result() {
           {task?.source === "w7900" ? (
             imageUrl ? (
               <div className="session-publish-poster result-publish-poster" ref={ref}>
-                <img className="session-publish-visual" src={imageUrl} alt={`${project.title} AI 主视觉`}/>
+                <img className="session-publish-visual" src={imageUrl} alt={`${posterCopy.title} AI 主视觉`}/>
                 <div className="session-publish-shade"/>
                 <div className="session-publish-copy">
                   <small>POSTER VISUAL LAB · AMD ROCm</small>
-                  <h2>{project.title}</h2><p>{project.theme}</p>
-                  <div className="session-publish-bands">{project.bands.map((band) => <span key={band.id}>{band.logo?.dataUrl ? <img src={band.logo.dataUrl} alt={`${band.name} Logo`}/> : <b>{band.name}</b>}</span>)}</div>
-                  <dl><div><dt>DATE / TIME</dt><dd>{project.dateTime}</dd></div><div><dt>VENUE</dt><dd>{[project.city, project.venue].filter(Boolean).join(' · ')}</dd></div>{project.price && <div><dt>TICKET</dt><dd>{project.price}</dd></div>}</dl>
+                  <h2>{posterCopy.title}</h2><p>{posterCopy.theme}</p>
+                  <div className="session-publish-bands">{posterCopy.bands.map((band) => <span key={band.id}>{band.logo?.dataUrl ? <img src={band.logo.dataUrl} alt={`${band.displayName} Logo`}/> : <b>{band.displayName}</b>}</span>)}</div>
+                  <dl><div><dt>{posterCopy.labels.date}</dt><dd>{project.dateTime}</dd></div><div><dt>{posterCopy.labels.venue}</dt><dd>{[posterCopy.city, posterCopy.venue].filter(Boolean).join(' · ')}</dd></div>{project.price && <div><dt>{posterCopy.labels.ticket}</dt><dd>{project.price}</dd></div>}</dl>
                   {project.assets.qr?.dataUrl && <img className="session-publish-qr" src={project.assets.qr.dataUrl} alt="购票二维码"/>}
                 </div>
               </div>
@@ -306,10 +314,17 @@ export default function Result() {
                 文字修改继续保存在项目中；真实输出图目前由 GPU 服务直接返回。
               </p>
               <label className="field">
-                <span>活动标题</span>
+                <span>{posterCopy.language === "en" ? "活动标题 / TITLE" : "活动标题"}</span>
                 <input
-                  value={project.title}
-                  onChange={(e) => set("title", e.target.value)}
+                  value={posterCopy.language === "en" ? project.titleEn ?? "" : project.title}
+                  onChange={(e) => posterCopy.language === "en" ? set("titleEn", e.target.value) : set("title", e.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>{posterCopy.language === "en" ? "主题文案 / TAGLINE" : "主题文案"}</span>
+                <input
+                  value={posterCopy.language === "en" ? project.themeEn ?? "" : project.theme}
+                  onChange={(e) => posterCopy.language === "en" ? set("themeEn", e.target.value) : set("theme", e.target.value)}
                 />
               </label>
               <label className="field">
@@ -320,10 +335,10 @@ export default function Result() {
                 />
               </label>
               <label className="field">
-                <span>地点</span>
+                <span>{posterCopy.language === "en" ? "地点 / VENUE" : "地点"}</span>
                 <input
-                  value={project.venue}
-                  onChange={(e) => set("venue", e.target.value)}
+                  value={posterCopy.language === "en" ? project.venueEn ?? "" : project.venue}
+                  onChange={(e) => posterCopy.language === "en" ? set("venueEn", e.target.value) : set("venue", e.target.value)}
                 />
               </label>
               {project.bands[0] && (
