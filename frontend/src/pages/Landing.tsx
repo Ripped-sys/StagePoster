@@ -4,7 +4,6 @@ import HeroStudio from '../components/HeroStudio';
 import SceneSelector from '../components/SceneSelector';
 import WorkflowTimeline from '../components/WorkflowTimeline';
 import PosterGallery from '../components/PosterGallery';
-import PosterLanguageToggle from '../components/PosterLanguageToggle';
 import {useState} from 'react';
 import type {PosterLanguage} from '../types';
 
@@ -18,10 +17,7 @@ export default function Landing() {
   };
   return (
     <main className="landing-studio">
-      <div className="landing-language-switch">
-        <PosterLanguageToggle value={language} onChange={changeLanguage}/>
-      </div>
-      <HeroStudio language={language} />
+      <HeroStudio language={language} onLanguageChange={changeLanguage} />
       <SceneSelector />
       <WorkflowTimeline />
       <PosterGallery language={language} />

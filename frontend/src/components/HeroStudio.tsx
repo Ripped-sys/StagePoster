@@ -5,18 +5,19 @@ import { ArrowRight, ArrowDown, Check } from 'lucide-react';
 import Brand from './Brand';
 import CreativePortal from './CreativePortal';
 import FloatingAssets from './FloatingAssets';
+import PosterLanguageToggle from './PosterLanguageToggle';
 import type {PosterLanguage} from '../types';
 
-export default function HeroStudio({language}: {language: PosterLanguage}) {
+export default function HeroStudio({language, onLanguageChange}: {
+  language: PosterLanguage;
+  onLanguageChange: (language: PosterLanguage) => void;
+}) {
   const english = language === 'en';
   const ref = useRef<HTMLElement>(null);
-  const { scrollYProgress } = useScroll({
-    target: ref,
-    offset: ['start start', 'end start'],
-  });
-  const yText = useTransform(scrollYProgress, [0, 1], [0, -60]);
-  const yStudio = useTransform(scrollYProgress, [0, 1], [0, 80]);
-  const opacityText = useTransform(scrollYProgress, [0, 0.8], [1, 0.3]);
+  const { scrollY } = useScroll();
+  const yText = useTransform(scrollY, [0, 800], [0, -60]);
+  const yStudio = useTransform(scrollY, [0, 800], [0, 80]);
+  const opacityText = useTransform(scrollY, [0, 640], [1, 0.3]);
 
   return (
     <section ref={ref} className="hero-studio">
@@ -34,9 +35,12 @@ export default function HeroStudio({language}: {language: PosterLanguage}) {
           <a href="#workflow">Workflow</a>
           <a href="#stories">Stories</a>
         </div>
-        <Link className="button" to="/create">
-          Enter Studio <ArrowRight size={15} />
-        </Link>
+        <div className="hero-studio-nav-actions">
+          <PosterLanguageToggle value={language} onChange={onLanguageChange} />
+          <Link className="button" to="/create">
+            Enter Studio <ArrowRight size={15} />
+          </Link>
+        </div>
       </nav>
 
       <div className="hero-studio-stage">

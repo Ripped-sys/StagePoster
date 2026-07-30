@@ -192,22 +192,26 @@ export const AI_API_BASE_URL = configuredBase.replace(/\/$/, '');
 
 async function fetchWithRetry(input: RequestInfo | URL, init?: RequestInit) {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  const method = (init?.method ?? 'GET').toUpperCase();
+  const maxAttempts = method === 'GET' || method === 'HEAD' ? 4 : 1;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const timeout = new AbortController();
-    const timeoutId = window.setTimeout(() => timeout.abort(), 30_000);
+    // AI planning and cold-started ROCm workflows can legitimately take over
+    // 30 seconds. A longer timeout prevents duplicate non-idempotent POSTs.
+    const timeoutId = window.setTimeout(() => timeout.abort(), 120_000);
     const signal = init?.signal
       ? AbortSignal.any([init.signal, timeout.signal])
       : timeout.signal;
     try {
       const response = await fetch(input, {...init, signal});
-      if ((response.status >= 500 || response.status === 429) && attempt < 3) {
+      if ((response.status >= 500 || response.status === 429) && attempt < maxAttempts - 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 700 * (2 ** attempt)));
         continue;
       }
       return response;
     } catch (error) {
       lastError = error;
-      if (attempt < 3) {
+      if (attempt < maxAttempts - 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 700 * (2 ** attempt)));
       }
     } finally {
