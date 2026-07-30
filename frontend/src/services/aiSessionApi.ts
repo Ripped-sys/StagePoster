@@ -132,7 +132,15 @@ export interface AISessionAsset {
   width?: number;
   height?: number;
   actuallyUsed?: boolean;
+  usedInStage?: string[];
+  usageNote?: string;
   processStatus?: string;
+  processing?: {
+    cutout?: 'queued' | 'running' | 'ready' | 'failed' | 'not_required';
+    logoTransparency?: 'queued' | 'running' | 'ready' | 'failed' | 'not_required';
+    referenceAnalysis?: 'queued' | 'running' | 'ready' | 'failed' | 'not_required';
+    error?: string;
+  };
   createdAt?: string;
 }
 
@@ -164,6 +172,16 @@ export interface AIMetrics {
   coldStartMs?: number;
   inferenceMs?: number;
   peakVramMb?: number;
+  latencyMs?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+}
+
+export interface BackendHealth {
+  status: string;
+  gpu?: {model?: string; vramTotalGB?: number; vramUsedGB?: number};
+  comfyui?: {status?: string; workflowVersion?: string};
+  vlm?: {status?: string; model?: string; sleeping?: boolean};
 }
 
 const configuredBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)
@@ -174,19 +192,26 @@ export const AI_API_BASE_URL = configuredBase.replace(/\/$/, '');
 
 async function fetchWithRetry(input: RequestInfo | URL, init?: RequestInit) {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const timeout = new AbortController();
+    const timeoutId = window.setTimeout(() => timeout.abort(), 30_000);
+    const signal = init?.signal
+      ? AbortSignal.any([init.signal, timeout.signal])
+      : timeout.signal;
     try {
-      const response = await fetch(input, init);
-      if (response.status >= 500 && attempt < 2) {
-        await new Promise((resolve) => window.setTimeout(resolve, 500 * (attempt + 1)));
+      const response = await fetch(input, {...init, signal});
+      if ((response.status >= 500 || response.status === 429) && attempt < 3) {
+        await new Promise((resolve) => window.setTimeout(resolve, 700 * (2 ** attempt)));
         continue;
       }
       return response;
     } catch (error) {
       lastError = error;
-      if (attempt < 2) {
-        await new Promise((resolve) => window.setTimeout(resolve, 500 * (attempt + 1)));
+      if (attempt < 3) {
+        await new Promise((resolve) => window.setTimeout(resolve, 700 * (2 ** attempt)));
       }
+    } finally {
+      window.clearTimeout(timeoutId);
     }
   }
   throw lastError instanceof Error ? lastError : new Error('StagePoster API 暂时不可用');
@@ -215,6 +240,7 @@ export function absoluteAIImageUrl(path?: string): string | undefined {
 }
 
 export const aiSessionApi = {
+  health: () => request<BackendHealth>('/health'),
   create: (brief?: AISessionBrief, assets?: {assetId: string; purpose: string}[]) => request<AISession>('/api/ai/sessions', {
     method: 'POST',
     body: JSON.stringify({brief: brief ?? {
@@ -225,11 +251,13 @@ export const aiSessionApi = {
   }),
   get: (sessionId: string) => request<AISession>(`/api/ai/sessions/${sessionId}`),
   async sendMessage(sessionId: string, content: string) {
-    const response = await request<{session: AISession}>(`/api/ai/sessions/${sessionId}/messages`, {
+    const response = await request<{session: AISession; metrics?: AIMetrics}>(`/api/ai/sessions/${sessionId}/messages`, {
       method: 'POST',
       body: JSON.stringify({content}),
     });
-    return response.session;
+    return response.metrics
+      ? {...response.session, metrics: {...response.session.metrics, ...response.metrics}}
+      : response.session;
   },
   async uploadAsset(blob: Blob, filename: string, kind: RemoteAsset['kind']) {
     const form = new FormData();
@@ -264,4 +292,11 @@ export const aiSessionApi = {
     method: 'POST',
     body: JSON.stringify({retry: true}),
   }),
+  async retryCandidate(sessionId: string, posterId: string, candidateId: string) {
+    await request(`/api/posters/${encodeURIComponent(posterId)}/candidates/${encodeURIComponent(candidateId)}/retry`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    return request<AISession>(`/api/ai/sessions/${sessionId}`);
+  },
 };

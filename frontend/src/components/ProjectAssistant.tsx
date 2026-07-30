@@ -2,7 +2,7 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import {Bot, Check, CornerDownLeft, Download, LoaderCircle, Maximize2, RefreshCw, Send, Sparkles, UserRound, X} from 'lucide-react';
 import {toPng} from 'html-to-image';
 import type {Participant, PosterProject, UploadedAsset} from '../types';
-import {absoluteAIImageUrl, aiSessionApi, type AISession, type AISessionBrief} from '../services/aiSessionApi';
+import {absoluteAIImageUrl, aiSessionApi, type AISession, type AISessionBrief, type BackendHealth} from '../services/aiSessionApi';
 import AssetUpload from './AssetUpload';
 
 export type ProjectDraft = Partial<Omit<PosterProject, 'bands'>> & {bands?: Participant[]};
@@ -147,6 +147,7 @@ export default function ProjectAssistant({project, onApply}: {
   const [boundAssetCount, setBoundAssetCount] = useState(0);
   const [uploadProgress, setUploadProgress] = useState('');
   const [pendingMessage, setPendingMessage] = useState('');
+  const [backendHealth, setBackendHealth] = useState<BackendHealth | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const publishRef = useRef<HTMLDivElement>(null);
@@ -161,6 +162,10 @@ export default function ProjectAssistant({project, onApply}: {
     session.status === 'generating_candidates' ||
     session.status === 'looping'
   );
+
+  useEffect(() => {
+    aiSessionApi.health().then(setBackendHealth).catch(() => setBackendHealth(null));
+  }, []);
 
   useEffect(() => {
     const id = localStorage.getItem(storageKey);
@@ -242,9 +247,10 @@ export default function ProjectAssistant({project, onApply}: {
     : (session?.assets ?? []).map((asset) => ({
       assetId: asset.assetId,
       purpose: asset.purpose,
-      stage: asset.actuallyUsed ? '生成流程' : undefined,
+      stage: asset.usedInStage?.join(' / ') || (asset.actuallyUsed ? '生成流程' : undefined),
       used: asset.actuallyUsed,
       status: asset.processStatus,
+      message: asset.usageNote || asset.processing?.error,
     }));
 
   const setConversationAsset = (kind: 'person' | 'logo' | 'reference', asset?: UploadedAsset) => {
@@ -337,8 +343,8 @@ export default function ProjectAssistant({project, onApply}: {
       <b>{readiness}% READY</b>
     </div>
     {session && <div className="assistant-telemetry" aria-label="生成运行状态">
-      <div><small>GPU</small><b>{session.metrics?.gpu ?? 'AMD GPU 节点'}</b></div>
-      <div><small>ROCm</small><b>{session.metrics?.rocm ?? '实时读取中'}</b></div>
+      <div><small>GPU</small><b>{session.metrics?.gpu ?? backendHealth?.gpu?.model ?? 'AMD GPU 节点'}</b></div>
+      <div><small>ROCm / WORKFLOW</small><b>{session.metrics?.rocm ?? backendHealth?.comfyui?.workflowVersion ?? '实时读取中'}</b></div>
       <div><small>阶段</small><b>{session.generationStages?.find((stage) => stage.status === 'running')?.label ?? session.status}</b></div>
       <div><small>进度</small><b>{session.poster ? `${session.poster.progress.completed}/${session.poster.progress.total}` : '等待任务'}</b></div>
     </div>}
@@ -361,7 +367,7 @@ export default function ProjectAssistant({project, onApply}: {
 
     {!!usageEvidence.length && <section className="assistant-asset-status">
       <header><b>素材处理与使用证据</b><span>{usageEvidence.filter((item) => item.used).length} 项已使用</span></header>
-      {usageEvidence.map((item) => <div key={`${item.assetId}-${item.purpose}`}><span>{item.purpose}</span><b className={item.used ? 'ok' : 'muted'}>{item.used ? `已用于 ${item.stage ?? '生成'}` : item.status ?? '未使用 / 处理中'}</b></div>)}
+      {usageEvidence.map((item) => <div key={`${item.assetId}-${item.purpose}`} title={item.message}><span>{item.purpose}</span><b className={item.used ? 'ok' : 'muted'}>{item.used ? `已用于 ${item.stage ?? '生成'}` : item.message ?? item.status ?? '未使用 / 处理中'}</b></div>)}
     </section>}
 
     {session && <button className="assistant-sync" onClick={applyBrief}><Check/> 将 AI 已理解的信息同步到表单</button>}
@@ -390,6 +396,7 @@ export default function ProjectAssistant({project, onApply}: {
             : <div className="candidate-placeholder"><LoaderCircle/><span>{candidate.status}</span></div>}
           <b>{candidate.variantName}</b><small>AI 主视觉 · Attempt {candidate.attempt} · {candidate.status}</small>
           {actions.includes('select_candidate') && candidate.status === 'ready' && <button disabled={busy} onClick={() => run(() => aiSessionApi.selectCandidate(session.sessionId, candidate.candidateId))}>选择这张</button>}
+          {candidate.status === 'failed' && session.poster && <button disabled={busy} onClick={() => run(() => aiSessionApi.retryCandidate(session.sessionId, session.poster!.posterId, candidate.candidateId))}>仅重试这张</button>}
         </article>;
       })}</div>
       {!!session.generationStages?.length && <div className="assistant-stage-trace">{session.generationStages.map((stage) => <div key={stage.id ?? stage.key ?? stage.label} className={stage.status}><span>{stage.label}</span><b>{stage.progress ?? (stage.status === 'completed' ? 100 : 0)}%</b>{stage.etaSeconds != null && <small>约 {stage.etaSeconds}s</small>}</div>)}</div>}
