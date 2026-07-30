@@ -103,10 +103,10 @@ type AssetBinding = {asset: UploadedAsset; kind: 'person' | 'logo' | 'reference'
 
 function projectAssetBindings(project: PosterProject): AssetBinding[] {
   const bindings: AssetBinding[] = [];
-  project.bands.forEach((band, index) => {
+  project.bands.forEach((band) => {
     if (band.groupPhoto) bindings.push({asset: band.groupPhoto, kind: 'person', purpose: 'performer'});
     if (band.keyPhoto) bindings.push({asset: band.keyPhoto, kind: 'person', purpose: 'performer'});
-    if (band.logo) bindings.push({asset: band.logo, kind: 'logo', purpose: index === 0 ? 'artist_logo' : 'sponsor_logo'});
+    if (band.logo) bindings.push({asset: band.logo, kind: 'logo', purpose: 'artist_logo'});
   });
   if (project.assets.speaker) bindings.push({asset: project.assets.speaker, kind: 'person', purpose: 'performer'});
   if (project.assets.organizerLogo) bindings.push({asset: project.assets.organizerLogo, kind: 'logo', purpose: 'event_logo'});
@@ -255,6 +255,11 @@ export default function ProjectAssistant({project, onApply}: {
       status: asset.processStatus,
       message: asset.usageNote || asset.processing?.error,
     }));
+  const generationHasStarted = candidates.length > 0 || Boolean(session?.poster?.resultUrl);
+  const boundEvidenceCount = session?.assets?.length ?? boundAssetCount;
+  const hasUnusedBoundAssets = generationHasStarted
+    && boundEvidenceCount > 0
+    && !usageEvidence.some((item) => item.used);
 
   const setConversationAsset = (kind: 'person' | 'logo' | 'reference', asset?: UploadedAsset) => {
     if (kind === 'reference') {
@@ -372,6 +377,10 @@ export default function ProjectAssistant({project, onApply}: {
       <header><b>素材处理与使用证据</b><span>{usageEvidence.filter((item) => item.used).length} 项已使用</span></header>
       {usageEvidence.map((item) => <div key={`${item.assetId}-${item.purpose}`} title={item.message}><span>{item.purpose}</span><b className={item.used ? 'ok' : 'muted'}>{item.used ? `已用于 ${item.stage ?? '生成'}` : item.message ?? item.status ?? '未使用 / 处理中'}</b></div>)}
     </section>}
+    {hasUnusedBoundAssets && <div className="assistant-error" role="alert">
+      <b>真实素材尚未参与本次生成</b>
+      <span>后端已接收素材，但没有返回任何实际使用证据。当前候选图不能视为人物保持或风格参考已生效。</span>
+    </div>}
 
     {session && <button className="assistant-sync" onClick={applyBrief}><Check/> 将 AI 已理解的信息同步到表单</button>}
     {canAttach && assetBindings.length > 0 && <button className="assistant-assets" disabled={busy} onClick={() => void uploadAndBindAssets()}>
