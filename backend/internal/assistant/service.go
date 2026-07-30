@@ -111,7 +111,7 @@ func (s *Service) Get(
 			posterResult = &poster
 
 			if session.Status !=
-				domain.AISessionStatusCancelled &&
+				domain.AISessionStatusCanceled &&
 				session.Status !=
 					domain.AISessionStatusCompletedWithWarnings &&
 				session.Status !=
@@ -749,7 +749,7 @@ func (s *Service) Cancel(
 	}
 
 	session.Status =
-		domain.AISessionStatusCancelled
+		domain.AISessionStatusCanceled
 	session.ErrorMessage = ""
 
 	if err := s.repository.UpdateAISession(
@@ -1098,7 +1098,7 @@ func availableActionsForSession(
 		return []string{}
 
 	case domain.AISessionStatusFailed,
-		domain.AISessionStatusCancelled:
+		domain.AISessionStatusCanceled:
 		return []string{}
 
 	default:

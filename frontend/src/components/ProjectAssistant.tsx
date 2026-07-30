@@ -154,7 +154,7 @@ export default function ProjectAssistant({project, onApply}: {
   projectRef.current = project;
   const actions = session?.availableActions ?? [];
   const canMessage = !session || actions.includes('send_message');
-  const canAttach = !!session && !['succeeded', 'completed_with_warnings', 'failed', 'cancelled'].includes(session.status);
+  const canAttach = !!session && !['succeeded', 'completed_with_warnings', 'failed', 'canceled', 'cancelled'].includes(session.status);
   const candidates = session?.poster?.candidates ?? [];
   const shouldPoll = !!session && (
     actions.includes('refresh') ||

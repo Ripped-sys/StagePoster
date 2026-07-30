@@ -327,10 +327,10 @@ planning_candidates → generating_candidates → validating_candidates
 collecting_brief → planning → awaiting_plan_selection
   → generating_candidates → awaiting_candidate_selection
   → selected → composing → reviewing
-  → succeeded / completed_with_warnings / failed / cancelled
+  → succeeded / completed_with_warnings / failed / canceled
 ```
 
-⚠️ 会话终态拼作 **`cancelled`**（英式双 l），而海报和任务用 `canceled`（单 l）。不一致，暂未统一以免破坏 API。
+终态取消统一拼 **`canceled`**（单 l），与海报、任务一致。会话曾经返回英式双 l 的 `cancelled`，本轮已统一；读取侧仍会把库里的旧值折叠成 `canceled`，所以不会再有两种拼法出现在同一个字段里。
 
 ### `GET /api/ai/sessions/{sessionId}` → `200` SessionResponse
 不存在 → `404 {"error":"AI session not found"}`
@@ -367,7 +367,7 @@ collecting_brief → planning → awaiting_plan_selection
 结果看 `reviewSummary`：`accepted=true` → `succeeded`；否则 `completed_with_warnings` 并保留最佳版本。
 
 ### `POST /api/ai/sessions/{sessionId}/cancel` → `200` SessionResponse
-`status` 变 `cancelled`。
+`status` 变 `canceled`。
 
 未定义的子路径 → `404 {"error":"AI session route not found"}`
 
@@ -449,8 +449,7 @@ collecting_brief → planning → awaiting_plan_selection
 ### 已知残留问题
 
 1. **下部条带偶尔被画成纯白色块**。`cfg=1` 让负向词失效，压不住。当前被 composer 的信息面板（默认从 77% 高度起）完整遮住，成品看不出来；但候选图预览里能看到。
-2. **会话终态 `cancelled` 与海报 `canceled` 拼写不一致**。
-3. **`finalize` 常返回 `completed_with_warnings`**（实测得分 75，阈值 82）。复审能识别问题，但 `RECOMPOSE`（重排版）救不了已经烤进图里的瑕疵 —— 那种情况需要 `REGENERATE`。
+2. **`finalize` 常返回 `completed_with_warnings`**（实测得分 75，阈值 82）。复审能识别问题，但 `RECOMPOSE`（重排版）救不了已经烤进图里的瑕疵 —— 那种情况需要 `REGENERATE`。
 
 ---
 

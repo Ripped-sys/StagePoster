@@ -111,7 +111,7 @@ succeeded or completed_with_warnings
 Additional terminal or exceptional states include:
 needs_user_input
 failed
-cancelled
+canceled
 Poster State
 Typical poster progression:
 created

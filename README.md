@@ -355,7 +355,7 @@ looping (review rounds)
 succeeded / completed_with_warnings
 ```
 
-Other states: `needs_user_input`, `failed`, `cancelled`
+Other states: `needs_user_input`, `failed`, `canceled`
 
 **Frontend must follow `availableActions` returned by the backend. Do not guess
 allowed actions.**
@@ -405,7 +405,7 @@ a warning and the tick loop continues.
 - [ ] Display all 3 Candidate image URLs
 - [ ] Use Candidate ID (not index) for selection
 - [ ] Both `succeeded` and `completed_with_warnings` allow download
-- [ ] Stop polling on `failed` or `cancelled`
+- [ ] Stop polling on `failed` or `canceled`
 - [ ] Allow tunnel URL replacement on restart
 
 Example:
