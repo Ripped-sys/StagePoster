@@ -3,8 +3,9 @@
 # =============================================================================
 # 策略说明：
 #   - 运行时生成的文件/目录 → gitignore
-#   - 空目录需要保留结构 → 使用 .gitkeep（仅 data/）
+#   - 空目录需要保留结构 → 使用 .gitkeep（仅 data/ 本地占位）
 #   - 第三方依赖/模型 → gitignore
+#   - NFS 持久化数据在 /workspace/persistence/，已在仓库外，无需 gitignore
 # =============================================================================
 
 
@@ -58,17 +59,19 @@ __pycache__/
 ComfyUI/
 
 
-# ---- 5. StagePoster 运行时：数据库 -------------------------------------------
-# SQLite 数据库及其 WAL/SHM 文件（运行时生成，部署时初始化）
-data/*.db
-data/*.db-shm
-data/*.db-wal
-backend/data/*.db
-backend/data/*.db-shm
-backend/data/*.db-wal
+# ---- 5. StagePoster 运行时：NFS 持久化目录 ------------------------------------
+# 数据已迁移到 /workspace/persistence/stageposter/（NFS）
+# 本地 backend/data/ 仅保留 .gitkeep 占位，不再存放实际数据
+# data/*.db
+# data/*.db-shm
+# data/*.db-wal
+# backend/data/*.db
+# backend/data/*.db-shm
+# backend/data/*.db-wal
 
 
 # ---- 6. StagePoster 运行时：日志 ---------------------------------------------
+# 日志现在写到 NFS: /workspace/persistence/stageposter/logs/
 backend/logs/
 logs/
 *.log
@@ -87,8 +90,8 @@ backend.pid
 
 
 # ---- 8. StagePoster 运行时：文件输出 ------------------------------------------
-# ComfyUI 任务输出、素材、最终海报（运行时写入）
-backend/storage/
+# 任务输出、素材、最终海报现在写到 NFS
+# backend/storage/
 
 
 # ---- 9. 环境变量与本地配置 ----------------------------------------------------
