@@ -580,13 +580,16 @@ job id 解析上，返回 `404 {"error":"job not found"}`。
 
 ### 未实现 —— 前端不要依赖
 
-这一节现在**只剩下真正被外部依赖卡住的项**。判断依据不用猜，直接读
-`GET /api/system/dependencies` 的 `capabilities`。
+只剩两项。判断依据不用猜，直接读 `GET /api/system/dependencies` 的
+`capabilities`，每项都带 `reason`。
 
-| 项 | 现状 | 卡在哪 |
+**这两项的权重都已经下载到位了，缺的是推理接线**，不是模型 —— `reason` 里会说清
+是哪种，因为这两件事的下一步完全不同。是主动划在范围外的，不是卡住了。
+
+| 项 | 现状 | 缺什么 |
 |---|---|---|
-| **背景去除 / 抠图** | `capabilities.backgroundRemoval.available = false`。`/api/assets/{id}/process` 的 `background_removal` 步骤现在如实返回 `skipped` | 没有 rembg / matting 模型。合成器只按素材自带 alpha 叠加（`xDraw.Over`），不会自己抠背景 |
-| **人物相似度指标** | `capabilities.personSimilarityMetric.available = false` | 没有人脸 / 图像嵌入模型 |
+| **背景去除 / 抠图** | `capabilities.backgroundRemoval.available = false`。`/api/assets/{id}/process` 的 `background_removal` 如实返回 `skipped` | RMBG-1.4 权重已在 `models/rmbg/`（176MB + ONNX 变体），但没有推理路径（要 Python 边车 + Go 调用）。目前合成器只按素材自带 alpha 叠加（`xDraw.Over`），不会自己抠背景 |
+| **人物相似度指标** | `capabilities.personSimilarityMetric.available = false` | CLIP ViT-B/32 权重已在 `models/clip-vit-b32/`，同样没接推理路径。另外注意：**接上也只能"度量"相似度，控制不了它** —— Z-Image 没有 IPAdapter |
 
 `maskPath` 字段仍在响应里，但**现在恒为空**：它以前存的不是蒙版，而是源文件的逐字节
 副本（扩展名硬编码成 `.png`，JPEG 上传会得到一个装着 JPEG 字节的 `.png`），没有任何
@@ -637,3 +640,56 @@ job id 解析上，返回 `404 {"error":"job not found"}`。
     0.55，**0.75 已经接近 1:1 复刻构图**，想要"只借调性"往 0.2–0.4 调
 13. logo 请上传**透明 PNG**。上传后看 `cutout.hasAlpha`：`false` 表示这个 logo 会以
     不透明矩形压在海报上（后端不会替你抠背景）
+
+---
+
+## 8. 后端交付状态
+
+**后端开发完毕。** CLAUDE.md §1 定义的主链路全程贯通并实测通过：
+
+```
+结构化 brief → Qwen 艺术指导 → 3 个设计方案 → ComfyUI + Z-Image → 3 张候选
+    → 用户选图 → Go 确定性中文排版 → Qwen 视觉复审 + 有限轮优化
+    → 成品 + 缩略图 + 复审证据
+```
+
+两条入口都能独立跑完：`POST /api/posters`（直接生成）和 `POST /api/ai/sessions`
+（AI 对话）。前端可以按本文档开始接。
+
+### 验收方式
+
+```bash
+.venv-vllm/bin/python scripts/e2e-test.py all
+```
+
+`scripts/e2e-test.py` 覆盖 `api/server.go` `Handler()` 注册的**全部 30 条路由**，
+含前缀路由下的每个子路径，共 **127 条断言，全绿**。phase 可以单独跑：
+
+| phase | 断言数 | 烧 GPU | 覆盖 |
+|---|---|---|---|
+| `negative` | 49 | 否 | 路由、方法约束、分页越界、404/405/400 语义、错误体不含内部路径 |
+| `assets` | 19 | 否 | 上传 / 读取 / 抠图状态 / 异步处理落地 |
+| `generate` | 4 | 是 | 裸 ComfyUI 任务 + 结果下载 |
+| `reference` | 4 | 是 | 参考图真的改变像素 + 错误码 |
+| `poster` | 24 | 是 | 完整海报流程 + cancel / retry 生命周期 |
+| `session` | 27 | 是 | AI 会话全流程 + finalize + 使用证据 |
+
+单独验参考图条件化：`scripts/verify-reference-e2e.py`（含同 seed 对照）。
+
+### 前端必须处理的三件事
+
+1. **异步**。创建类接口返回 **202**，不是 201。海报要轮询，`partial_ready` 不是终态。
+2. **能力矩阵**。放某个入口之前读 `capabilities.<能力>.available`，不要硬编码。
+3. **`finalize` 常态是 `completed_with_warnings`**，不是 `succeeded`。实测评分
+   75–78，通过阈值是 82。这**不是错误** —— 成品可用，只是自动优化没能到达理想分。
+   UI 不要把它当失败处理。
+
+### 运维上两个必须知道的点
+
+1. **vLLM 启动参数不能丢 `--mm-processor-cache-gb 0`**。丢了以后所有带图请求会稳定
+   500（`AssertionError: Expected a cached item for mm_hash=...`），症状是"会话一旦
+   附素材就必失败"，而纯文本请求正常，很容易误判成后端 bug。用
+   `scripts/start-all.sh` 起服务就自带这个参数。
+2. **后端二进制自己不读 `.env`**，靠启动脚本 `set -a; source .env` 注入。手动
+   `./poster-backend` 起会静默丢掉 `REFERENCE_CONTROL_PATCH` 之类的配置，
+   参考图条件化会退化成不可用。启动日志会打印实际状态，以它为准。

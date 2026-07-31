@@ -598,18 +598,25 @@ func (s *Server) capabilities() map[string]any {
 		"negativePrompt":             negative,
 		"referenceImageConditioning": reference,
 
-		// 没有接 rembg / matting 一类的背景去除模型。合成器只按素材自带的
-		// alpha 叠加，不会自己抠背景。
+		// 背景去除：RMBG-1.4 的权重已经放在 models/rmbg 下，但没有接推理路径
+		// （需要 Python 边车 + Go 调用）。合成器只按素材自带的 alpha 叠加，
+		// 不会自己抠背景。
+		//
+		// reason 要说清是"权重没有"还是"没接线" —— 这两件事的下一步完全不同。
 		"backgroundRemoval": map[string]any{
 			"available": false,
-			"reason": "no background removal model wired; " +
+			"reason": "RMBG-1.4 weights are staged at models/rmbg " +
+				"but no inference path is wired; " +
 				"upload transparent PNG assets",
 		},
 
-		// 人物相似度需要人脸/图像嵌入模型，同样没有。
+		// 人物相似度：CLIP ViT-B/32 的权重也已就位，同样没接推理路径。
+		// 注意即便接上也只能"度量"相似度 —— Z-Image 没有 IPAdapter，
+		// 控制不了它。
 		"personSimilarityMetric": map[string]any{
 			"available": false,
-			"reason":    "no face/image embedding model installed",
+			"reason": "CLIP ViT-B/32 weights are staged at " +
+				"models/clip-vit-b32 but no inference path is wired",
 		},
 	}
 }
