@@ -21,7 +21,7 @@ test('remote result composes exact information and downloads a PNG', async ({pag
   await page.goto(`/result/${project.id}`);
   await expect(page.locator('.session-publish-poster')).toBeVisible();
   await expect(page.locator('.session-publish-copy h2')).toContainText(project.titleEn ?? project.title);
-  await page.getByRole('button', {name: '中文'}).click();
+  await page.locator('.result-canvas .poster-language-toggle').getByRole('button', {name: '中文'}).click();
   await expect(page.locator('.session-publish-copy h2')).toContainText(project.title);
   const download = page.waitForEvent('download');
   await page.getByRole('button', {name: /导出 PNG/}).click();

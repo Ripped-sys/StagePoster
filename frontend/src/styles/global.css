@@ -397,3 +397,22 @@
   .hero-studio-nav-actions>.button svg{margin:0}
   .manual-candidates>div{grid-template-columns:1fr}
 }
+
+/* Competition evidence and workspace navigation */
+.workspace-top{display:grid;grid-template-columns:240px minmax(0,1fr) auto;align-items:center;gap:20px;border-bottom:1px solid var(--border)}
+.workspace-top-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
+.site-language-toggle{display:flex;align-items:center;padding:3px;border:1px solid var(--border);background:#090a11;min-height:38px}
+.site-language-toggle button{min-height:30px;padding:0 10px;border:0;background:transparent;color:var(--muted);font:700 9px Inter;letter-spacing:.08em}
+.site-language-toggle button.active{background:var(--orange);color:#080910}
+.assistant-reference-ready{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;align-items:center;margin-top:10px;padding:10px;border:1px solid #245139;background:#0b1814;color:var(--success)}
+.assistant-reference-ready svg{grid-row:1/3;width:16px}.assistant-reference-ready span{font-size:9px;font-weight:700}.assistant-reference-ready small{font-size:8px;color:var(--muted)}
+.assistant-quality-link{width:100%;margin-top:8px;color:var(--success);border-color:#315644}
+.generation-cancel{margin-top:18px}.candidate-error{color:var(--warning);font-size:8px;margin:6px 0}
+.quality-review{margin-top:24px;border:1px solid #343744;background:#0b0c12;padding:18px}
+.quality-review>header{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:18px}.quality-review header small{color:var(--orange);font:700 8px Inter;letter-spacing:.14em}.quality-review h3{margin:4px 0 0;font-size:17px}.quality-review header>strong{font:700 24px "Archivo Black"}.quality-review header>strong.accepted{color:var(--success)}.quality-review header>strong.warning{color:var(--warning)}
+.quality-score-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px}.quality-score-grid span{display:flex;justify-content:space-between;font-size:9px;color:var(--muted)}.quality-score-grid span b{color:var(--text)}.quality-score-grid i{display:block;height:3px;background:#292b34;margin-top:6px}.quality-score-grid em{display:block;height:100%;background:linear-gradient(90deg,var(--orange-deep),var(--orange));max-width:100%}
+.quality-decision{padding:10px;border-left:2px solid var(--warning);background:#18140c;font-size:9px;margin:18px 0 0}.quality-decision b{color:var(--text)}
+.quality-failures,.quality-issues{margin-top:14px;border-top:1px solid var(--border);padding-top:12px}.quality-failures>b,.quality-issues>b{font-size:9px}.quality-failures p{display:grid;gap:3px;color:#e4b297;font-size:8px;margin:8px 0}.quality-failures strong{color:var(--warning)}.quality-issues article{display:grid;grid-template-columns:auto 1fr;gap:4px 8px;padding:9px 0;border-bottom:1px solid #ffffff0a;font-size:8px}.quality-issues article>span{color:var(--warning);text-transform:uppercase}.quality-issues article>p{grid-column:2;margin:0;font-size:8px}.evidence-error{display:block;color:var(--warning);margin-top:12px}
+.technical-evidence{margin-top:20px;border:1px solid var(--border);background:#0b0c12}.technical-evidence summary{display:flex;align-items:center;justify-content:space-between;padding:14px;cursor:pointer;font-size:10px;font-weight:700}.technical-evidence summary small{color:var(--orange);font-size:8px}.evidence-grid{display:grid;grid-template-columns:1fr 1fr;padding:0 14px 14px}.metrics-list .evidence-grid>div{display:grid;gap:4px;align-content:start;padding:11px;border:1px solid #ffffff0a;margin:-1px 0 0 -1px}.evidence-grid span{font-size:8px}.evidence-grid b{font-size:9px;overflow-wrap:anywhere}
+.result-actions{flex-wrap:wrap}.result-actions>*{flex:1 1 145px}.lightbox-zoom{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:3;display:flex;align-items:center;gap:8px;padding:5px;background:#090a11;border:1px solid var(--border)}.lightbox-zoom button{position:static!important;width:32px!important;height:32px!important}.lightbox-zoom b{font-size:9px;min-width:42px;text-align:center}.poster-lightbox>img{transition:transform .2s ease;transform-origin:center}
+@media(max-width:760px){.workspace-top{grid-template-columns:1fr auto;padding:0 10px}.workspace-top>span{display:none}.workspace-top-actions{gap:5px}.workspace-top-actions .ghost-button{font-size:0;padding:0 11px}.workspace-top-actions .ghost-button svg{margin:0}.site-language-toggle button{padding:0 7px}.quality-score-grid,.evidence-grid{grid-template-columns:1fr}}

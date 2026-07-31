@@ -66,6 +66,7 @@ export interface AICandidate {
   variantName: string;
   status: string;
   attempt: number;
+  seed?: number;
   selected: boolean;
   imageUrl?: string;
   error?: string;

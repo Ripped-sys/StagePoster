@@ -66,6 +66,20 @@ test('mobile landing and create have no horizontal overflow', async ({page}) => 
   expect(errors).toEqual([]);
 });
 
+test('workspace navigation stays outside the sidebar and interface language persists', async ({page}) => {
+  await page.setViewportSize({width: 1280, height: 720});
+  await page.goto('/create');
+  const sidebar = await page.locator('.steps').boundingBox();
+  const actions = await page.locator('.workspace-top-actions').boundingBox();
+  expect(sidebar).not.toBeNull();
+  expect(actions).not.toBeNull();
+  expect(actions!.x).toBeGreaterThanOrEqual(sidebar!.x + sidebar!.width);
+  await page.getByLabel('界面语言 / Interface language').getByRole('button', {name: 'EN'}).click();
+  await expect(page.locator('.workspace-top-actions .ghost-button')).toContainText('Home');
+  await page.reload();
+  await expect(page.getByLabel('界面语言 / Interface language').getByRole('button', {name: 'EN'})).toHaveAttribute('aria-pressed', 'true');
+});
+
 test('required fields still block generation and return to scene step', async ({page}) => {
   await page.goto('/create');
   await page.locator('.steps button').nth(3).click();

@@ -1,7 +1,10 @@
 import type {
   GenerationCandidate,
   GenerationTask,
+  PosterReview,
+  PosterTimeline,
   PosterProject,
+  RuntimeEvidence,
   UploadedAsset,
 } from '../types';
 import {formatPosterLocation} from '../utils/posterLanguage';
@@ -37,6 +40,7 @@ interface PosterResponse {
     etaSeconds?: number;
   };
   candidates?: GenerationCandidate[];
+  selectedCandidateId?: string;
 }
 
 function authHeaders(): Record<string, string> {
@@ -131,6 +135,7 @@ function posterTask(projectId: string, response: PosterResponse, startedAt: numb
     candidates: response.candidates ?? [],
     elapsedSeconds: response.progress?.elapsedSeconds,
     etaSeconds: response.progress?.etaSeconds,
+    selectedCandidateId: response.selectedCandidateId,
   };
 }
 
@@ -141,7 +146,13 @@ const styleColors: Record<string, string[]> = {
 };
 
 export const posterApi = {
-  health: () => request<{status: string; tokenRequired: boolean}>('/health'),
+  health: () => request<RuntimeEvidence & {tokenRequired?: boolean}>('/health'),
+  dependencies: () => request<{status?: string; dependencies?: Record<string, {status?: string; model?: string}>; capabilities?: Record<string, {available?: boolean; reason?: string; influences?: string[]; controlMode?: string}>}>('/api/system/dependencies'),
+  timeline: (posterId: string) => request<PosterTimeline>(`/api/posters/${encodeURIComponent(posterId)}/timeline`),
+  reviews: async (posterId: string) => {
+    const response = await request<{items?: PosterReview[]; reviews?: PosterReview[]}>(`/api/posters/${encodeURIComponent(posterId)}/reviews?limit=20&offset=0`);
+    return response.items ?? response.reviews ?? [];
+  },
 
   async submit(project: PosterProject): Promise<GenerationTask> {
     const referenceAssetId = project.assets.reference
@@ -209,6 +220,15 @@ export const posterApi = {
     return posterTask(task.projectId, response, task.startedAt);
   },
 
+  async retryCandidate(task: GenerationTask, candidateId: string): Promise<GenerationTask> {
+    const response = await request<PosterResponse>(`/api/posters/${encodeURIComponent(task.id)}/candidates/${encodeURIComponent(candidateId)}/retry`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json; charset=utf-8'},
+      body: JSON.stringify({}),
+    });
+    return posterTask(task.projectId, response, task.startedAt);
+  },
+
   async resultBlob(task: GenerationTask) {
     const selectedVisual = task.candidates?.find((candidate) => candidate.selected && candidate.imageUrl)
       ?? task.candidates?.find((candidate) => candidate.status === 'ready' && candidate.imageUrl);
@@ -222,9 +242,30 @@ export const posterApi = {
     return response.blob();
   },
 
+  async imageMetadata(task: GenerationTask) {
+    const blob = await this.resultBlob(task);
+    const url = URL.createObjectURL(blob);
+    try {
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      const divisor = greatestCommonDivisor(image.naturalWidth, image.naturalHeight);
+      return {width: image.naturalWidth, height: image.naturalHeight, format: blob.type || 'image/png', sizeBytes: blob.size, aspectRatio: `${image.naturalWidth / divisor}:${image.naturalHeight / divisor}`};
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  },
+
   resultUrl: (posterId: string) => `${BASE}/api/posters/${encodeURIComponent(posterId)}/result`,
   imageUrl: (path?: string) => path ? (/^https?:\/\//i.test(path) ? path : `${BASE}${path}`) : undefined,
 };
+
+function greatestCommonDivisor(a: number, b: number): number {
+  let left = Math.abs(a);
+  let right = Math.abs(b);
+  while (right) [left, right] = [right, left % right];
+  return left || 1;
+}
 
 export function localMockTask(projectId: string): GenerationTask {
   return {

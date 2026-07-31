@@ -1,7 +1,9 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {Bot, Check, CornerDownLeft, Download, LoaderCircle, Maximize2, RefreshCw, Send, Sparkles, UserRound, X} from 'lucide-react';
+import {Bot, Check, CheckCircle2, CornerDownLeft, Download, LoaderCircle, Maximize2, RefreshCw, Send, Sparkles, UserRound, X} from 'lucide-react';
 import {toPng} from 'html-to-image';
-import type {Participant, PosterProject, UploadedAsset} from '../types';
+import {useNavigate} from 'react-router-dom';
+import type {GenerationTask, Participant, PosterProject, UploadedAsset} from '../types';
+import {useStore} from '../store';
 import {
   absoluteAIImageUrl,
   aiSessionApi,
@@ -21,6 +23,10 @@ const fieldLabels: Record<string, string> = {
   'event.time': '时间', 'event.venue': '场地', 'visual.style': '视觉风格',
   'visual.theme': '视觉主题', 'visual.musicGenre': '音乐类型', 'visual.mood': '情绪关键词',
 };
+
+function extractEnglishTitle(content: string) {
+  return content.match(/(?:英文标题|English title)\s*[:：]\s*([A-Za-z0-9][A-Za-z0-9 '&.-]{2,})(?=[。；，,\n]|$)/i)?.[1]?.trim();
+}
 
 async function renderPublishPng(node: HTMLElement): Promise<string> {
   const width = Math.max(node.getBoundingClientRect().width, 1);
@@ -175,6 +181,8 @@ export default function ProjectAssistant({project, onApply}: {
   project: PosterProject;
   onApply: (draft: ProjectDraft) => void;
 }) {
+  const navigate = useNavigate();
+  const {saveTask} = useStore();
   const storageKey = `poster-ai-session:${project.id}`;
   const [session, setSession] = useState<AISession | null>(null);
   const [input, setInput] = useState('');
@@ -187,7 +195,7 @@ export default function ProjectAssistant({project, onApply}: {
   const [pendingMessage, setPendingMessage] = useState('');
   const [backendHealth, setBackendHealth] = useState<BackendHealth | null>(null);
   const [backendDependencies, setBackendDependencies] = useState<BackendDependencies | null>(null);
-  const [referenceStrength, setReferenceStrength] = useState(0.35);
+  const [referenceStrength] = useState(0.35);
   const [assetWarnings, setAssetWarnings] = useState<string[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -203,6 +211,34 @@ export default function ProjectAssistant({project, onApply}: {
     session.status === 'generating_candidates' ||
     session.status === 'looping'
   );
+
+  useEffect(() => {
+    if (!session?.poster || !['succeeded', 'completed_with_warnings'].includes(session.status)) return;
+    const poster = session.poster;
+    const evidenceTask: GenerationTask = {
+      id: poster.posterId,
+      projectId: project.id,
+      step: 5,
+      progress: 100,
+      status: 'complete',
+      startedAt: Date.now() - (poster.progress.elapsedSeconds ?? 0) * 1000,
+      metrics: {
+        gpu: session.metrics?.gpu ?? backendHealth?.gpu?.model ?? '未提供',
+        rocm: session.metrics?.rocm ?? '未提供',
+        resolution: '1024 × 1536',
+        duration: session.metrics?.inferenceMs != null ? `${Math.round(session.metrics.inferenceMs / 1000)}s` : poster.progress.elapsedSeconds != null ? `${poster.progress.elapsedSeconds}s` : '未提供',
+        peakVram: session.metrics?.peakVramMb != null ? `${Math.round(session.metrics.peakVramMb / 1024 * 10) / 10} GB` : '未提供',
+      },
+      source: 'w7900',
+      remoteStatus: session.status,
+      candidates: poster.candidates,
+      selectedCandidateId: poster.selectedCandidateId,
+      elapsedSeconds: poster.progress.elapsedSeconds,
+      etaSeconds: poster.progress.etaSeconds,
+      outputUrl: absoluteAIImageUrl(poster.resultUrl),
+    };
+    saveTask(evidenceTask);
+  }, [backendHealth?.gpu?.model, project.id, saveTask, session]);
 
   useEffect(() => {
     aiSessionApi.health().then(setBackendHealth).catch(() => setBackendHealth(null));
@@ -305,6 +341,8 @@ export default function ProjectAssistant({project, onApply}: {
   const send = async (preset?: string) => {
     const content = (preset ?? input).trim();
     if (!content || busy) return;
+    const englishTitle = extractEnglishTitle(content);
+    if (englishTitle && !project.titleEn?.trim()) onApply({titleEn: englishTitle, posterLanguage: 'en'});
     setInput(''); setPendingMessage(content); setBusy(true); setError('');
     try {
       let current = session;
@@ -540,7 +578,7 @@ export default function ProjectAssistant({project, onApply}: {
           {imageUrl && !imageErrors[candidate.candidateId]
             ? <button className="candidate-image-button" type="button" onClick={() => setLightbox({src: imageUrl, alt: candidate.variantName})} aria-label={`放大查看 ${candidate.variantName}`}><img src={imageUrl} alt={candidate.variantName} onError={() => setImageErrors((current) => ({...current, [candidate.candidateId]: true}))}/><Maximize2/></button>
             : <div className="candidate-placeholder"><LoaderCircle/><span>{candidate.status}</span></div>}
-          <b>{candidate.variantName}</b><small>AI 主视觉 · Attempt {candidate.attempt} · {candidate.status}</small>
+          <b>{candidate.variantName}</b><small>AI 主视觉 · Attempt {candidate.attempt} · Seed {candidate.seed ?? '—'} · {candidate.status}</small>
           {candidate.spec && <details className="candidate-spec"><summary>查看视觉参数</summary>
             {candidate.spec.motif && <p>{candidate.spec.motif}</p>}
             {candidate.spec.camera && <small>{candidate.spec.camera}</small>}
@@ -573,6 +611,7 @@ export default function ProjectAssistant({project, onApply}: {
       </div>}
       {selectedVisualUrl && <button className="button assistant-publish-download" disabled={busy} onClick={() => void downloadPublishedPoster()}><Download/> 导出精确信息发布版</button>}
       {selectedVisualUrl && <button className="ghost-button assistant-publish-preview" disabled={busy} onClick={() => void previewPublishedPoster()}><Maximize2/> 放大查看最终发布版</button>}
+      {selectedVisualUrl && session?.poster && ['succeeded', 'completed_with_warnings'].includes(session.status) && <button className="ghost-button assistant-quality-link" onClick={() => navigate(`/result/${encodeURIComponent(project.id)}`)}><CheckCircle2/> 查看完整质量与性能报告</button>}
       {session?.reviewSummary?.warning && <p className="assistant-review-warning">评分 {session.reviewSummary.bestScore ?? '—'} · {session.reviewSummary.warning}</p>}
       {actions.includes('download_final') && <details><summary>查看后端原始合成结果</summary><img src={finalUrl} alt="后端合成的最终海报"/><a className="button" href={finalUrl} target="_blank" rel="noreferrer"><Download/> 下载后端结果</a></details>}
     </section>}
@@ -580,24 +619,13 @@ export default function ProjectAssistant({project, onApply}: {
     {canMessage && <>
       <details className="assistant-upload-studio assistant-attachment-tray">
         <summary><span>＋ 添加附件（可选）</span><small>{assetBindings.length ? `${assetBindings.length} 项素材` : '人物 / Logo / 风格参考'}</small></summary>
-        <p>所有附件均非必填。透明 Logo 会作为原始图层叠加；参考图可通过 ControlNet 影响主视觉构图。</p>
+        <p>所有附件均非必填。上传参考海报后，系统会自动理解它的视觉语言并安全生成新的主视觉。</p>
         <div className="assistant-upload-grid">
           <AssetUpload label="人物 / 乐队照片（可选）" kind="person" value={project.bands[0]?.groupPhoto} onChange={(asset) => setConversationAsset('person', asset)}/>
           <AssetUpload label="乐队原始 Logo（可选）" kind="logo" value={project.bands[0]?.logo} onChange={(asset) => setConversationAsset('logo', asset)}/>
-          <AssetUpload label="海报风格参考（可选）" kind="reference" value={project.assets.reference} onChange={(asset) => setConversationAsset('reference', asset)}/>
+          <AssetUpload label="添加参考海报（可选）" kind="reference" value={project.assets.reference} onChange={(asset) => setConversationAsset('reference', asset)}/>
         </div>
-        {project.assets.reference && backendDependencies?.capabilities?.referenceImageConditioning?.available && <label className="assistant-reference-strength">
-          <span>参考图影响强度 <b>{referenceStrength.toFixed(2)}</b></span>
-          <input
-            type="range"
-            min={backendDependencies.capabilities.referenceImageConditioning.strength?.min ?? 0.05}
-            max={backendDependencies.capabilities.referenceImageConditioning.strength?.max ?? 1}
-            step="0.05"
-            value={referenceStrength}
-            onChange={(event) => setReferenceStrength(Number(event.target.value))}
-          />
-          <small>0.2–0.4 借调性 · 0.55 平衡 · 0.75 接近复刻构图</small>
-        </label>}
+        {project.assets.reference && backendDependencies?.capabilities?.referenceImageConditioning?.available && <div className="assistant-reference-ready"><CheckCircle2/><span>参考海报已就绪</span><small>系统将自动选择安全的参考方式</small></div>}
         {!session && assetBindings.length > 0 && <small className="assistant-asset-hint">发送第一条消息时会先上传附件，并把参考图 ID 与强度写入生成 Brief。</small>}
         {session && project.assets.reference && !session.brief.visual.referenceAssetId && <small className="assistant-asset-hint warning">当前会话创建时没有参考图。请开始新的 AI 会话，让参考图真正进入生成 Brief。</small>}
         {!!assetWarnings.length && <div className="assistant-asset-warnings">{assetWarnings.map((warning) => <small key={warning}>{warning}</small>)}</div>}

@@ -14,6 +14,8 @@ export interface GenerationCandidate{
   status:string;
   selected:boolean;
   attempt:number;
+  seed?:number;
+  error?:string;
   imageUrl?:string;
   spec?:{motif?:string;composition?:string;camera?:string;materials?:string[];palette?:string[];lighting?:string};
 }
@@ -32,4 +34,14 @@ export interface GenerationTask{
   candidates?:GenerationCandidate[];
   elapsedSeconds?:number;
   etaSeconds?:number;
+  selectedCandidateId?:string;
 }
+
+export interface ReviewScores{requirementAlignment?:number;composition?:number;typography?:number;readability?:number;visualQuality?:number;brandConsistency?:number}
+export interface ReviewFailure{code:string;description:string}
+export interface ReviewIssue{code:string;severity:string;layer?:string;description:string;suggestion?:string}
+export interface PosterReview{reviewId:string;posterId:string;candidateId?:string;round?:number;totalScore:number;scores?:ReviewScores;hardFailures?:ReviewFailure[];issues?:ReviewIssue[];decision:string;model?:string;promptTokens?:number;completionTokens?:number;latencyMs?:number;result?:{totalScore?:number;scores?:ReviewScores;hardFailures?:ReviewFailure[];issues?:ReviewIssue[];decision?:string};createdAt?:string}
+export interface PosterEvidenceMetrics{reviewRounds?:number;promptTokens?:number;completionTokens?:number;totalTokens?:number;reviewLatencyMs?:number;wallClockSeconds?:number}
+export interface PosterTimeline{posterId:string;reviews?:PosterReview[];metrics?:PosterEvidenceMetrics}
+export interface ImageMetadata{width:number;height:number;format:string;sizeBytes:number;aspectRatio:string}
+export interface RuntimeEvidence{status?:string;gpu?:{model?:string;vramTotalGB?:number;vramUsedGB?:number};comfyui?:{status?:string;workflowVersion?:string};vlm?:{status?:string;model?:string;sleeping?:boolean};runtime?:{goVersion?:string}}

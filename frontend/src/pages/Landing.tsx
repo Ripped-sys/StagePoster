@@ -9,11 +9,12 @@ import type {PosterLanguage} from '../types';
 
 export default function Landing() {
   const [language, setLanguage] = useState<PosterLanguage>(() =>
-    localStorage.getItem('poster-site-language') === 'zh' ? 'zh' : 'en'
+    localStorage.getItem('poster-site-language') === 'en' ? 'en' : 'zh'
   );
   const changeLanguage = (next: PosterLanguage) => {
     setLanguage(next);
     localStorage.setItem('poster-site-language', next);
+    window.dispatchEvent(new Event('poster-site-language-change'));
   };
   return (
     <main className="landing-studio">

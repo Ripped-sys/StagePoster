@@ -14,9 +14,11 @@ import Brand from "../components/Brand";
 import AssetUpload from "../components/AssetUpload";
 import ProjectAssistant from "../components/ProjectAssistant";
 import PosterLanguageToggle from "../components/PosterLanguageToggle";
+import SiteLanguageToggle from "../components/SiteLanguageToggle";
 import { demoProject, emptyProject, styles } from "../data/mock";
 import { useStore } from "../store";
 import type { Participant, PosterProject, SceneType } from "../types";
+import {useSiteLanguage} from "../hooks/useSiteLanguage";
 const scenes: [SceneType, string, string][] = [
   ["concert", "音乐演出", "乐队、Livehouse 与巡演"],
   ["festival", "音乐节", "多艺人、多舞台阵容"],
@@ -59,6 +61,7 @@ const Field = ({
   </label>
 );
 export default function Create() {
+  const {english} = useSiteLanguage();
   const [params] = useSearchParams();
   const { save, projects } = useStore();
   const [project, setProject] = useState<PosterProject>(() => {
@@ -160,9 +163,12 @@ export default function Create() {
       <header className="workspace-top">
         <Brand />
         <span>NEW PROJECT / {project.id.slice(0, 8).toUpperCase()}</span>
-        <button className="ghost-button" onClick={() => nav("/")}>
-          <ArrowLeft size={15} /> 返回首页
-        </button>
+        <div className="workspace-top-actions">
+          <SiteLanguageToggle />
+          <button className="ghost-button" onClick={() => nav("/")}>
+            <ArrowLeft size={15} /> {english ? 'Home' : '返回首页'}
+          </button>
+        </div>
       </header>
       <div className="workspace-grid">
         <aside className="steps">
@@ -301,7 +307,7 @@ export default function Create() {
                   }
                 />
                 <AssetUpload
-                  label="风格参考图"
+                  label="添加参考海报（可选）"
                   kind="reference"
                   value={project.assets.reference}
                   onChange={(v) =>

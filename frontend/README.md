@@ -59,6 +59,11 @@ pnpm exec playwright test tests/live-session.spec.ts
 - 参考图 ID 与控制强度写入生成 Brief，并展示 `reference_control` 实际使用证据
 - 手动表格模式使用 `/api/posters`：202 创建、3.5 秒轮询、`partial_ready`、三候选选择和最终合成
 - 后端能力矩阵、素材透明度、完整进度、耗时和 ETA 可视化
+- 创建、生成和结果页提供持久化界面语言切换；海报文案语言独立切换
+- 参考海报采用自动安全策略，普通用户无需设置 ControlNet 或模板参数
+- 结果页接入 `/timeline` 与 `/reviews`，展示六维质量评分、硬失败、问题和优化建议
+- 折叠展示 GPU、显存、工作流、VLM、Token、复审耗时和图片尺寸等 ROCm 证据
+- 原始 GPU 主视觉与 1024 × 1536 精确信息发布版可分别下载
 - AI brief 由用户确认后同步到表单，不自动覆盖最终信息
 - 选中 AI 主视觉后，用前端确定性信息层生成并导出发布版 PNG
 - 输出选项、必填校验、错误定位及素材状态保留

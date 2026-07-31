@@ -48,7 +48,7 @@ test('form flow reaches a real-data result with the current poster contract', as
   await page.getByRole('button', {name: '选择这张并合成'}).click();
   await expect(page).toHaveURL(/\/result\//, {timeout: 20_000});
   await expect(page.locator('.session-publish-copy h2')).toContainText("CHANG'AN DUEL");
-  await page.getByRole('button', {name: '中文'}).click();
+  await page.locator('.result-canvas .poster-language-toggle').getByRole('button', {name: '中文'}).click();
   await expect(page.locator('.session-publish-copy h2')).toContainText('长安双雄');
   const [download] = await Promise.all([
     page.waitForEvent('download', {timeout: 30_000}),

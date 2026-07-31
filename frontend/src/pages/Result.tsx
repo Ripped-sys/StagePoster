@@ -15,10 +15,13 @@ import AssetUpload from "../components/AssetUpload";
 import Brand from "../components/Brand";
 import PosterPreview from "../components/PosterPreview";
 import PosterLanguageToggle from "../components/PosterLanguageToggle";
+import SiteLanguageToggle from "../components/SiteLanguageToggle";
 import { posterApi } from "../services/posterApi";
 import { useStore } from "../store";
 import type { Participant, PosterProject } from "../types";
+import type {ImageMetadata, PosterReview, PosterTimeline, RuntimeEvidence} from "../types";
 import { formatPosterLocation, localizedPosterCopy } from "../utils/posterLanguage";
+import {useSiteLanguage} from "../hooks/useSiteLanguage";
 
 async function renderRemotePublishPng(project: PosterProject, imageUrl: string) {
   const copy = localizedPosterCopy(project);
@@ -94,6 +97,7 @@ async function downloadDataUrl(href: string) {
 }
 
 export default function Result() {
+  const {english} = useSiteLanguage();
   const { id = "" } = useParams();
   const { projects, tasks, save } = useStore();
   const nav = useNavigate();
@@ -104,6 +108,13 @@ export default function Result() {
   const [exportError, setExportError] = useState("");
   const [resultAttempt, setResultAttempt] = useState(0);
   const [lightbox, setLightbox] = useState("");
+  const [lightboxScale, setLightboxScale] = useState(1);
+  const [timeline, setTimeline] = useState<PosterTimeline>();
+  const [reviews, setReviews] = useState<PosterReview[]>([]);
+  const [runtime, setRuntime] = useState<RuntimeEvidence>();
+  const [dependencies, setDependencies] = useState<Record<string, {status?: string; model?: string}>>();
+  const [imageMetadata, setImageMetadata] = useState<ImageMetadata>();
+  const [evidenceError, setEvidenceError] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const project = projects[id];
   const task = useMemo(
@@ -130,6 +141,27 @@ export default function Result() {
       if (url) URL.revokeObjectURL(url);
     };
   }, [task, resultAttempt]);
+  useEffect(() => {
+    if (!task || task.source !== 'w7900') return;
+    let active = true;
+    Promise.allSettled([
+      posterApi.timeline(task.id),
+      posterApi.reviews(task.id),
+      posterApi.health(),
+      posterApi.dependencies(),
+      posterApi.imageMetadata(task),
+    ]).then((results) => {
+      if (!active) return;
+      if (results[0].status === 'fulfilled') setTimeline(results[0].value);
+      if (results[1].status === 'fulfilled') setReviews(results[1].value);
+      if (results[2].status === 'fulfilled') setRuntime(results[2].value);
+      if (results[3].status === 'fulfilled') setDependencies(results[3].value.dependencies);
+      if (results[4].status === 'fulfilled') setImageMetadata(results[4].value);
+      const failures = results.filter((result) => result.status === 'rejected').length;
+      setEvidenceError(failures ? `${failures} ${english ? 'evidence sources unavailable' : '项证据暂不可用'}` : '');
+    });
+    return () => { active = false; };
+  }, [task, resultAttempt, english]);
   if (!project)
     return (
       <main className="center-state">
@@ -210,14 +242,31 @@ export default function Result() {
     ["Logo 与二维码使用原始素材图层", "通过"],
     ["输出可下载为 PNG", "通过"],
   ];
+  const evidenceReviews = reviews.length ? reviews : timeline?.reviews ?? [];
+  const latestReview = evidenceReviews.reduce<PosterReview | undefined>((best, review) => !best || review.totalScore > best.totalScore ? review : best, undefined);
+  const reviewScores = latestReview?.scores ?? latestReview?.result?.scores;
+  const reviewFailures = latestReview?.hardFailures ?? latestReview?.result?.hardFailures;
+  const reviewIssues = latestReview?.issues ?? latestReview?.result?.issues;
+  const evidenceMetrics = timeline?.metrics;
+  const selectedCandidate = task?.candidates?.find((candidate) => candidate.candidateId === task.selectedCandidateId)
+    ?? task?.candidates?.find((candidate) => candidate.selected);
+  const scoreRows: Array<[string, number | undefined]> = [
+    [english ? 'Requirement alignment' : '需求匹配', reviewScores?.requirementAlignment],
+    [english ? 'Composition' : '构图', reviewScores?.composition],
+    [english ? 'Typography' : '排版', reviewScores?.typography],
+    [english ? 'Readability' : '可读性', reviewScores?.readability],
+    [english ? 'Visual quality' : '视觉质量', reviewScores?.visualQuality],
+    [english ? 'Brand consistency' : '品牌一致性', reviewScores?.brandConsistency],
+  ];
+  const displayScore = (score?: number) => score == null ? 0 : score <= 1 ? Math.round(score * 100) : Math.round(score);
   return (
     <main className="result">
       <nav>
         <Brand />
         <span>RESULT / {id.slice(0, 8).toUpperCase()}</span>
-        <button className="ghost-button" onClick={() => nav(editUrl)}>
-          <ArrowLeft /> 返回编辑
-        </button>
+        <div className="workspace-top-actions"><SiteLanguageToggle/><button className="ghost-button" onClick={() => nav(editUrl)}>
+          <ArrowLeft /> {english ? 'Back to edit' : '返回编辑'}
+        </button></div>
       </nav>
       <div className="result-layout">
         <section className="result-canvas">
@@ -269,6 +318,7 @@ export default function Result() {
               <Download />
               {busy ? "正在导出…" : "导出 PNG"}
             </button>
+            {imageUrl && <a className="ghost-button" href={imageUrl} download={`poster-${project.title}-visual.png`}><Download/> {english ? 'Raw visual' : '原始主视觉'}</a>}
             <button className="ghost-button" onClick={() => void previewLarge()} disabled={busy}><Maximize2/> 放大</button>
           </div>
           {exportError && <div className="assistant-error" role="alert"><b>导出失败</b><span>{exportError}</span><button onClick={() => setExportError("")}>关闭</button></div>}
@@ -306,6 +356,16 @@ export default function Result() {
                 </div>
               ))}
               {!isRemoteResult && <div className="warning-box"><b>当前不是 GPU 实际输出</b><p>此页面用于检查信息图层、布局与 PNG 导出；连接远程生成服务后才能进行最终发布检查。</p></div>}
+              {isRemoteResult && <section className="quality-review" aria-label="AI quality review">
+                <header><div><small>AI QUALITY REVIEW</small><h3>{english ? 'Visual quality evidence' : '视觉质量证据'}</h3></div><strong className={latestReview && latestReview.totalScore >= 82 ? 'accepted' : 'warning'}>{latestReview ? `${latestReview.totalScore}/100` : '—'}</strong></header>
+                {latestReview ? <>
+                  <div className="quality-score-grid">{scoreRows.map(([label, score]) => <div key={label}><span>{label}<b>{score == null ? '—' : displayScore(score)}</b></span><i><em style={{width: `${displayScore(score)}%`}}/></i></div>)}</div>
+                  <p className="quality-decision"><b>{latestReview.decision}</b> · {latestReview.totalScore >= 82 ? (english ? 'Accepted for publish' : '达到发布标准') : (english ? 'Usable result with optimization advice' : '成品可用，仍有优化建议')}</p>
+                  {!!reviewFailures?.length && <div className="quality-failures"><b>{english ? 'Hard failures' : '硬失败项'}</b>{reviewFailures.map((failure) => <p key={failure.code}><strong>{failure.code}</strong>{failure.description}</p>)}</div>}
+                  {!!reviewIssues?.length && <div className="quality-issues"><b>{english ? 'Review findings' : '审查发现'}</b>{reviewIssues.map((issue) => <article key={`${issue.code}-${issue.description}`}><span>{issue.severity}</span><strong>{issue.description}</strong>{issue.suggestion && <p>{issue.suggestion}</p>}</article>)}</div>}
+                </> : <p>{english ? 'No visual review has been recorded yet.' : '尚未产生视觉复审记录。'}</p>}
+                {evidenceError && <small className="evidence-error">{evidenceError}</small>}
+              </section>}
             </div>
           )}
           {tab === "edit" && (
@@ -371,13 +431,31 @@ export default function Result() {
                   <b>{value}</b>
                 </div>
               ))}
+              <details className="technical-evidence">
+                <summary>{english ? 'Generation details' : '生成详情'} <small>{english ? 'ROCm evidence' : 'ROCm 推理证据'}</small></summary>
+                <div className="evidence-grid">
+                  <div><span>GPU</span><b>{runtime?.gpu?.model ?? '未提供'}</b></div>
+                  <div><span>{english ? 'VRAM' : '显存'}</span><b>{runtime?.gpu?.vramUsedGB != null ? `${runtime.gpu.vramUsedGB} / ${runtime.gpu.vramTotalGB ?? '—'} GB` : '未提供'}</b></div>
+                  <div><span>ROCm</span><b>{task?.metrics.rocm || '未提供'}</b></div>
+                  <div><span>ComfyUI</span><b>{runtime?.comfyui?.workflowVersion ?? dependencies?.comfyui?.status ?? '未提供'}</b></div>
+                  <div><span>VLM</span><b>{runtime?.vlm?.model ?? dependencies?.vlm?.model ?? '未提供'}</b></div>
+                  <div><span>{english ? 'Wall clock' : '总耗时'}</span><b>{evidenceMetrics?.wallClockSeconds != null ? `${evidenceMetrics.wallClockSeconds}s` : task?.elapsedSeconds != null ? `${task.elapsedSeconds}s` : '未提供'}</b></div>
+                  <div><span>{english ? 'Review latency' : '复审耗时'}</span><b>{evidenceMetrics?.reviewLatencyMs != null ? `${Math.round(evidenceMetrics.reviewLatencyMs / 1000)}s` : '未提供'}</b></div>
+                  <div><span>Tokens</span><b>{evidenceMetrics?.totalTokens ?? '未提供'}</b></div>
+                  <div><span>{english ? 'Review rounds' : '复审轮次'}</span><b>{evidenceMetrics?.reviewRounds ?? '未提供'}</b></div>
+                  <div><span>{english ? 'Candidate' : '候选图'}</span><b>{selectedCandidate?.variantName ?? '未提供'}</b></div>
+                  <div><span>Seed / Attempt</span><b>{selectedCandidate?.seed ?? '—'} / {selectedCandidate?.attempt ?? '—'}</b></div>
+                  <div><span>{english ? 'Image' : '图片质量'}</span><b>{imageMetadata ? `${imageMetadata.width} × ${imageMetadata.height} · ${imageMetadata.aspectRatio} · ${(imageMetadata.sizeBytes / 1024 / 1024).toFixed(2)} MB` : '未提供'}</b></div>
+                </div>
+              </details>
             </div>
           )}
         </aside>
       </div>
-      {lightbox && <div className="poster-lightbox" role="dialog" aria-modal="true" aria-label="最终海报大图" onClick={() => setLightbox("")}>
+      {lightbox && <div className="poster-lightbox" role="dialog" aria-modal="true" aria-label="最终海报大图" onClick={() => {setLightbox(""); setLightboxScale(1);}}>
         <button type="button" onClick={() => setLightbox("")} aria-label="关闭大图"><X/></button>
-        <img src={lightbox} alt={`${project.title} 最终发布版`} onClick={(event) => event.stopPropagation()}/>
+        <div className="lightbox-zoom" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => setLightboxScale((scale) => Math.max(.5, scale - .25))}>−</button><b>{Math.round(lightboxScale * 100)}%</b><button type="button" onClick={() => setLightboxScale((scale) => Math.min(3, scale + .25))}>＋</button></div>
+        <img src={lightbox} alt={`${project.title} 最终发布版`} style={{transform: `scale(${lightboxScale})`}} onClick={(event) => event.stopPropagation()}/>
         <a href={lightbox} download={`poster-${project.title}.png`} onClick={(event) => event.stopPropagation()}><Download/> 下载图片</a>
       </div>}
     </main>
