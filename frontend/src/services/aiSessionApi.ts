@@ -196,9 +196,10 @@ async function fetchWithRetry(input: RequestInfo | URL, init?: RequestInit) {
   const maxAttempts = method === 'GET' || method === 'HEAD' ? 4 : 1;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const timeout = new AbortController();
-    // AI planning and cold-started ROCm workflows can legitimately take over
-    // 30 seconds. A longer timeout prevents duplicate non-idempotent POSTs.
-    const timeoutId = window.setTimeout(() => timeout.abort(), 120_000);
+    // Planning, generation and review can legitimately take several minutes
+    // on the remote ROCm worker. Keep one non-idempotent POST alive instead of
+    // aborting it and encouraging an accidental duplicate submission.
+    const timeoutId = window.setTimeout(() => timeout.abort(), 300_000);
     const signal = init?.signal
       ? AbortSignal.any([init.signal, timeout.signal])
       : timeout.signal;
@@ -294,7 +295,7 @@ export const aiSessionApi = {
   }),
   retryFinalize: (sessionId: string) => request<AISession>(`/api/ai/sessions/${sessionId}/finalize`, {
     method: 'POST',
-    body: JSON.stringify({retry: true}),
+    body: JSON.stringify({}),
   }),
   async retryCandidate(sessionId: string, posterId: string, candidateId: string) {
     await request(`/api/posters/${encodeURIComponent(posterId)}/candidates/${encodeURIComponent(candidateId)}/retry`, {

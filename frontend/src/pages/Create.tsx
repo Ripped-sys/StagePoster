@@ -71,7 +71,12 @@ export default function Create() {
   const [notice, setNotice] = useState("");
   const nav = useNavigate();
   const mainRef = useRef<HTMLDivElement>(null);
-  useEffect(() => save(project), [project, save]);
+  useEffect(() => {
+    save(project);
+    if (params.get("project") !== project.id) {
+      nav(`/create?project=${encodeURIComponent(project.id)}`, { replace: true });
+    }
+  }, [nav, params, project, save]);
   const set = <K extends keyof PosterProject>(
     key: K,
     value: PosterProject[K],

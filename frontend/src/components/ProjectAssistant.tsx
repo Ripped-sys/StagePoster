@@ -15,6 +15,34 @@ const fieldLabels: Record<string, string> = {
   'visual.theme': '视觉主题', 'visual.musicGenre': '音乐类型', 'visual.mood': '情绪关键词',
 };
 
+async function renderPublishPng(node: HTMLElement): Promise<string> {
+  const width = Math.max(node.getBoundingClientRect().width, 1);
+  const source = await toPng(node, {
+    pixelRatio: Math.max(2, 1024 / width),
+    cacheBust: true,
+  });
+
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 1536;
+      const context = canvas.getContext('2d');
+      if (!context) {
+        reject(new Error('浏览器无法创建 PNG 画布'));
+        return;
+      }
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = 'high';
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    image.onerror = () => reject(new Error('发布版海报栅格化失败'));
+    image.src = source;
+  });
+}
+
 function briefToDraft(session: AISession, project: PosterProject): ProjectDraft {
   const {event, visual} = session.brief;
   const names = (event.artist ?? '').split(/\s*(?:&|×|x|、|,|，| and )\s*/i).filter(Boolean);
@@ -157,7 +185,7 @@ export default function ProjectAssistant({project, onApply}: {
   projectRef.current = project;
   const actions = session?.availableActions ?? [];
   const canMessage = !session || actions.includes('send_message');
-  const canAttach = !!session && !['succeeded', 'completed_with_warnings', 'failed', 'cancelled'].includes(session.status);
+  const canAttach = !!session && !['succeeded', 'completed_with_warnings', 'failed', 'canceled', 'cancelled'].includes(session.status);
   const candidates = session?.poster?.candidates ?? [];
   const shouldPoll = !!session && (
     actions.includes('refresh') ||
@@ -255,11 +283,18 @@ export default function ProjectAssistant({project, onApply}: {
       status: asset.processStatus,
       message: asset.usageNote || asset.processing?.error,
     }));
-  const generationHasStarted = candidates.length > 0 || Boolean(session?.poster?.resultUrl);
+  const generationHasOutput = candidates.some((candidate) => candidate.status === 'ready')
+    || Boolean(session?.poster?.resultUrl);
   const boundEvidenceCount = session?.assets?.length ?? boundAssetCount;
-  const hasUnusedBoundAssets = generationHasStarted
+  const hasUnusedBoundAssets = generationHasOutput
     && boundEvidenceCount > 0
     && !usageEvidence.some((item) => item.used);
+  const publishFactsConfirmed = Boolean(
+    project.title.trim()
+    && project.dateTime.trim()
+    && project.venue.trim()
+    && (project.subject.trim() || project.bands.some((band) => band.name.trim())),
+  );
 
   const setConversationAsset = (kind: 'person' | 'logo' | 'reference', asset?: UploadedAsset) => {
     if (kind === 'reference') {
@@ -280,7 +315,7 @@ export default function ProjectAssistant({project, onApply}: {
     if (!publishRef.current) return;
     setBusy(true); setError('');
     try {
-      const src = await toPng(publishRef.current, {pixelRatio: 2, cacheBust: true});
+      const src = await renderPublishPng(publishRef.current);
       setLightbox({src, alt: '最终发布版海报'});
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '海报预览生成失败');
@@ -291,7 +326,7 @@ export default function ProjectAssistant({project, onApply}: {
     if (!publishRef.current) return;
     setBusy(true); setError('');
     try {
-      const dataUrl = await toPng(publishRef.current, {pixelRatio: 2, cacheBust: true});
+      const dataUrl = await renderPublishPng(publishRef.current);
       const anchor = document.createElement('a');
       anchor.download = `${project.title || session?.brief.event.title || 'poster'}-publish.png`;
       anchor.href = dataUrl;
@@ -352,7 +387,8 @@ export default function ProjectAssistant({project, onApply}: {
     </div>
     {session && <div className="assistant-telemetry" aria-label="生成运行状态">
       <div><small>GPU</small><b>{session.metrics?.gpu ?? backendHealth?.gpu?.model ?? 'AMD GPU 节点'}</b></div>
-      <div><small>ROCm / WORKFLOW</small><b>{session.metrics?.rocm ?? backendHealth?.comfyui?.workflowVersion ?? '实时读取中'}</b></div>
+      <div><small>ROCm</small><b>{session.metrics?.rocm ?? '后端未透出'}</b></div>
+      <div><small>WORKFLOW</small><b>{backendHealth?.comfyui?.workflowVersion ?? '实时读取中'}</b></div>
       <div><small>阶段</small><b>{session.generationStages?.find((stage) => stage.status === 'running')?.label ?? session.status}</b></div>
       <div><small>进度</small><b>{session.poster ? `${session.poster.progress.completed}/${session.poster.progress.total}` : '等待任务'}</b></div>
     </div>}
@@ -375,7 +411,7 @@ export default function ProjectAssistant({project, onApply}: {
 
     {!!usageEvidence.length && <section className="assistant-asset-status">
       <header><b>素材处理与使用证据</b><span>{usageEvidence.filter((item) => item.used).length} 项已使用</span></header>
-      {usageEvidence.map((item) => <div key={`${item.assetId}-${item.purpose}`} title={item.message}><span>{item.purpose}</span><b className={item.used ? 'ok' : 'muted'}>{item.used ? `已用于 ${item.stage ?? '生成'}` : item.message ?? item.status ?? '未使用 / 处理中'}</b></div>)}
+      {usageEvidence.map((item) => <div key={`${item.assetId}-${item.purpose}`} title={item.message}><span>{item.purpose}</span><b className={item.used ? 'ok' : 'muted'}>{item.used ? `已用于 ${item.stage ?? '生成'}` : item.message ?? (generationHasOutput ? '已绑定 · 条件化未启用' : '已绑定 · 等待生成')}</b></div>)}
     </section>}
     {hasUnusedBoundAssets && <div className="assistant-error" role="alert">
       <b>真实素材尚未参与本次生成</b>
@@ -390,10 +426,11 @@ export default function ProjectAssistant({project, onApply}: {
 
     {actions.includes('confirm_plan') && !!session?.plans?.length && <section className="assistant-plans">
       <header><b>选择一个设计方向</b><span>{session.plans.length} 个真实方案</span></header>
+      {!publishFactsConfirmed && <p className="assistant-plan-gate" role="status">先点击“将 AI 已理解的信息同步到表单”，确认标题、时间和地点后再生成。</p>}
       {session.plans.map(({planId, plan}) => <article key={planId}>
         <div className="plan-palette">{plan.palette.map((color) => <i key={color} style={{background: color}}/>)}</div>
         <b>{plan.name}</b><p>{plan.concept}</p><small>{plan.composerTemplate} · {plan.composition.symmetry}</small>
-        <button disabled={busy} onClick={() => run(() => aiSessionApi.confirmPlan(session.sessionId, planId))}>确认此方案</button>
+        <button disabled={busy || !publishFactsConfirmed} onClick={() => run(() => aiSessionApi.confirmPlan(session.sessionId, planId))}>{publishFactsConfirmed ? '确认此方案' : '请先确认活动信息'}</button>
       </article>)}
     </section>}
 
