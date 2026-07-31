@@ -693,3 +693,30 @@ job id 解析上，返回 `404 {"error":"job not found"}`。
 2. **后端二进制自己不读 `.env`**，靠启动脚本 `set -a; source .env` 注入。手动
    `./poster-backend` 起会静默丢掉 `REFERENCE_CONTROL_PATCH` 之类的配置，
    参考图条件化会退化成不可用。启动日志会打印实际状态，以它为准。
+
+### 可访问性验证（本轮实测）
+
+**验证的是公网隧道那条路，不是 localhost** —— 前端要走的是隧道，本地 `curl` 全绿
+不代表浏览器能用。隧道地址仍然不写进本文档（见开头说明），按那里的方式取。
+
+```bash
+E2E_BASE=$(cat backend/run/public-api-url.txt) \
+  .venv-vllm/bin/python scripts/e2e-test.py negative assets
+```
+
+实测结果：
+
+| 检查项 | 结果 |
+|---|---|
+| 非 GPU 全量断言（路由 / 方法 / 分页 / 错误语义 / 素材全流程） | **68 条全绿** |
+| `GET /health` | `200` |
+| `GET /api/system/dependencies` | `200` |
+| **CORS 预检** `OPTIONS /api/posters` | `204`，带 `Allow-Origin: *`、`Allow-Headers: Content-Type, Authorization, X-Poster-Token`、`Allow-Methods: GET, POST, OPTIONS` |
+| `GET /api/posters/{id}/result` | `200 image/png`，546 KB |
+| `GET /api/posters/{id}/thumbnail` | `200 image/png`，181 KB，实际解码为 512×768 |
+
+隧道 RTT 约 1–2 s，`/api/system/dependencies` 因为要探 ComfyUI 和 vLLM 实测 6 s ——
+**只读接口也别设短超时**。
+
+隧道是 Quick Tunnel：**进程重启地址就变**。前端拿到 404/连接失败先确认地址是不是过期，
+再怀疑后端。长期用建议换具名 tunnel 或固定域名。
