@@ -7,7 +7,7 @@ const STEPS = [
     code: 'Reality',
     zh: '上传真实素材',
     en: 'Real assets, not prompts.',
-    desc: '人物照片、Logo、地点、主题色 —— 直接上传，AI 不重新想象。',
+    desc: '人物、Logo、地点与参考图分别上传；当前版本准确保留文字与 Logo，人物条件化规划中。',
     icon: Camera,
   },
   {

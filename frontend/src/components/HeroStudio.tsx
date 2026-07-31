@@ -115,7 +115,7 @@ export default function HeroStudio({language, onLanguageChange}: {
             transition={{ duration: 0.8, delay: 0.95 }}
           >
             <li>
-              <Check size={13} /> {english ? 'REAL PEOPLE PRESERVED' : '保留真实人物'}
+              <Check size={13} /> {english ? 'REAL DATA PRESERVED' : '保留真实信息'}
             </li>
             <li>
               <Check size={13} /> {english ? 'ORIGINAL LOGOS PRESERVED' : '保留原始 Logo'}

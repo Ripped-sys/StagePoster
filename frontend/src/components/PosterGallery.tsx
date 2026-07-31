@@ -132,7 +132,7 @@ export default function PosterGallery({language}: {language: PosterLanguage}) {
             {english ? <>From Reality <span>to Poster</span></> : <>从真实素材 <span>到海报</span></>}
           </h2>
           <p className="gallery-lead">
-            {english ? 'Explore AI-generated visuals created from real people, places, and stories.' : '探索由真实人物、地点与故事生成的 AI 视觉作品。'}
+            {english ? 'Explore AI-generated visuals built from real event data, places, and stories.' : '探索由真实活动信息、地点与故事生成的 AI 视觉作品。'}
           </p>
           <p className="gallery-lead-zh">{english ? '从真实素材到视觉世界' : 'REAL MATERIALS · REAL STORIES · NEW VISUALS'}</p>
         </div>

@@ -32,7 +32,7 @@ export default function Landing() {
           <p>
             {language === 'en' ? 'Multimodal AI poster creation · Reality collides with visual.' : '多模态 AI 海报创作 · 让真实素材撞上主视觉。'}
             <br />
-            <span>POWERED BY AMD RADEON · ROCm 6.x</span>
+            <span>POWERED BY AMD RADEON · ROCm</span>
           </p>
           <small>© 2026 Poster · Visual Lab · Hackathon MVP</small>
         </div>
