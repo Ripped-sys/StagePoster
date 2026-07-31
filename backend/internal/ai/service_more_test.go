@@ -64,13 +64,41 @@ func TestNormalizeDesignResult(
 		)
 	}
 
-	if !strings.Contains(
-		result.Plans[0].PositivePrompt,
-		"upper title area",
-	) {
-		t.Fatalf(
-			"positive prompt missing title safe zone",
-		)
+	// 安全区必须以“低细节 + 同色系”的形式出现，而不是“干净空白”。
+	// 后者会让 Z-Image 直接画一块纯白色块，毁掉整张海报。
+	for _, required := range []string{
+		"upper region kept low in detail",
+		"same color family",
+		"no flat white panels",
+	} {
+		if !strings.Contains(
+			result.Plans[0].PositivePrompt,
+			required,
+		) {
+			t.Fatalf(
+				"positive prompt missing %q: %s",
+				required,
+				result.Plans[0].PositivePrompt,
+			)
+		}
+	}
+
+	for _, banned := range []string{
+		"clean empty upper title area",
+		"clean upper area",
+		// 对一个会写字的模型说“这里是标题区”，它就会往里写标题。
+		"title area",
+		"information area",
+	} {
+		if strings.Contains(
+			result.Plans[0].PositivePrompt,
+			banned,
+		) {
+			t.Fatalf(
+				"positive prompt still asks for %q",
+				banned,
+			)
+		}
 	}
 }
 

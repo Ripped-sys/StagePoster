@@ -126,7 +126,7 @@ const TERMINAL = new Set([
   "succeeded",
   "completed_with_warnings",
   "failed",
-  "cancelled",
+  "canceled",
   "needs_user_input",
 ]);
 

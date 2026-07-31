@@ -642,7 +642,7 @@ Terminal states:
 ```text
 completed
 failed
-cancelled
+canceled
 ```
 
 The frontend should display stage labels. Progress percentages are approximate.

@@ -40,22 +40,22 @@ func main() {
 
 	databasePath := env(
 		"DB_PATH",
-		"/workspace/poster-engine/backend/data/poster.db",
+		"/workspace/persistence/stageposter/data/poster.db",
 	)
 
 	storageRoot := env(
 		"STORAGE_ROOT",
-		"/workspace/poster-engine/backend/storage/jobs",
+		"/workspace/persistence/stageposter/storage/jobs",
 	)
 
 	assetStorageRoot := env(
 		"ASSET_STORAGE_ROOT",
-		"/workspace/poster-engine/backend/storage/assets",
+		"/workspace/persistence/stageposter/storage/assets",
 	)
 
 	posterOutputRoot := env(
 		"POSTER_OUTPUT_ROOT",
-		"/workspace/poster-engine/backend/storage/posters",
+		"/workspace/persistence/stageposter/storage/posters",
 	)
 
 	workflowKey := env(

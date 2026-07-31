@@ -133,6 +133,25 @@ func (r *Repository) MigrateAISessions(
 		}
 	}
 
+	// 终态拼写统一：会话曾经写 "cancelled"（英式双 l），海报和任务写
+	// "canceled"。同一个 API 返回两种拼法，前端得写两个分支。已统一到单 l，
+	// 这条把库里的旧行改过来。幂等。
+	if _, err := r.db.ExecContext(
+		ctx,
+		`
+		UPDATE ai_sessions
+		SET status = ?
+		WHERE status = ?
+		`,
+		string(domain.AISessionStatusCanceled),
+		string(domain.AISessionStatusLegacyCanceled),
+	); err != nil {
+		return fmt.Errorf(
+			"normalize canceled AI session status: %w",
+			err,
+		)
+	}
+
 	return nil
 }
 
@@ -792,6 +811,12 @@ func scanAISession(
 	session.SelectedPlanID = selectedPlanID.String
 	session.PosterID = posterID.String
 	session.ErrorMessage = errorMessage.String
+
+	// 迁移语句已经把库里的行改成了单 l，但一个跑着旧二进制的进程仍可能写回
+	// "cancelled"。读取侧归一化让新旧进程共用一个库时也不会出现两种终态。
+	session.Status = domain.NormalizeAISessionStatus(
+		session.Status,
+	)
 
 	var err error
 

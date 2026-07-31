@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -135,6 +136,15 @@ func (s *Server) handlePosterRoute(
 		segments[1] == "result" &&
 		request.Method == http.MethodGet:
 		s.handlePosterResult(
+			writer,
+			request,
+			posterID,
+		)
+
+	case len(segments) == 2 &&
+		segments[1] == "thumbnail" &&
+		request.Method == http.MethodGet:
+		s.handlePosterThumbnail(
 			writer,
 			request,
 			posterID,
@@ -390,13 +400,46 @@ func (s *Server) handlePosterResult(
 	request *http.Request,
 	posterID string,
 ) {
+	s.servePosterFile(
+		writer,
+		request,
+		posterID,
+		s.posterFlow.OpenFinalResult,
+		"poster result not found",
+	)
+}
+
+func (s *Server) handlePosterThumbnail(
+	writer http.ResponseWriter,
+	request *http.Request,
+	posterID string,
+) {
+	s.servePosterFile(
+		writer,
+		request,
+		posterID,
+		s.posterFlow.OpenThumbnail,
+		"poster thumbnail not found",
+	)
+}
+
+func (s *Server) servePosterFile(
+	writer http.ResponseWriter,
+	request *http.Request,
+	posterID string,
+	open func(
+		context.Context,
+		string,
+	) (posterflow.ComposedFile, error),
+	notFoundMessage string,
+) {
 	ctx, cancel := contextWithTimeout(
 		request,
 		60*time.Second,
 	)
 	defer cancel()
 
-	result, err := s.posterFlow.OpenFinalResult(
+	result, err := open(
 		ctx,
 		posterID,
 	)
@@ -417,7 +460,7 @@ func (s *Server) handlePosterResult(
 		writeError(
 			writer,
 			http.StatusNotFound,
-			"poster result not found",
+			notFoundMessage,
 		)
 		return
 
@@ -476,9 +519,20 @@ func (s *Server) handlePosterCancel(
 		return
 	}
 
+	// Cancel 对 succeeded / failed / canceled 是无操作的，所以不能写死
+	// "canceled"——那会让一张已经成功的海报在响应里显示成已取消。
+	status := domain.PosterStatusCanceled
+
+	if response, err := s.posterFlow.Get(
+		ctx,
+		posterID,
+	); err == nil {
+		status = response.Status
+	}
+
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"posterId": posterID,
-		"status":   "canceled",
+		"status":   status,
 	})
 }
 

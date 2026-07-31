@@ -31,10 +31,13 @@ connections are not acceptable.
 |---|---|---|
 | `queued` | Waiting to execute | No |
 | `running` | Currently executing | No |
-| `cancelling` | Cancellation in progress | No |
-| `completed` | Finished successfully | Yes |
+| `succeeded` | Finished successfully | Yes |
 | `failed` | Finished with error | Yes |
-| `cancelled` | Cancelled by user | Yes |
+| `canceled` | Canceled by user | Yes |
+
+These are the exact wire values in `domain.JobStatus`. Earlier drafts of this
+document listed `cancelling` and `completed`; neither was ever emitted.
+`canceled` uses one `l`, matching poster and AI-session statuses.
 
 ### Sub-States (ComfyUI polling)
 
@@ -65,10 +68,9 @@ POST /api/jobs/{jobId}/cancel
 ```
 
 Cancellation is best-effort:
-1. Set status to `cancelling`
-2. If ComfyUI job is still queued, remove from queue
-3. If already running, let it finish but discard output
-4. Update status to `cancelled`
+1. If the ComfyUI job is still queued, remove it from the queue
+2. If it is already running, let it finish but discard the output
+3. Update status to `canceled`
 
 ## 5. Retry
 
@@ -88,7 +90,7 @@ On startup, the backend:
 
 1. Queries all `queued` and `running` jobs from SQLite
 2. For each job, checks ComfyUI history via `/history/{prompt_id}`
-3. If ComfyUI shows `completed`, transitions to `completed` and copies output
+3. If ComfyUI shows `completed`, transitions to `succeeded` and copies output
 4. If ComfyUI shows `failed`, transitions to `failed`
 5. If ComfyUI has no record, transitions to `failed` (stale)
 

@@ -163,7 +163,7 @@ POSTER_ID=$(curl -fsS -X POST "$BASE_URL/api/ai/sessions/$SESSION_ID/plans/$PLAN
 while true; do
   STATUS=$(curl -fsS "$BASE_URL/api/ai/sessions/$SESSION_ID" | jq -r '.status')
   [[ "$STATUS" == "awaiting_candidate_selection" ]] && break
-  [[ "$STATUS" =~ ^(failed|cancelled)$ ]] && { echo "FAILED: $STATUS"; exit 1; }
+  [[ "$STATUS" =~ ^(failed|canceled)$ ]] && { echo "FAILED: $STATUS"; exit 1; }
   sleep 10
 done
 
