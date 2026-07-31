@@ -49,6 +49,17 @@ type VisualBrief struct {
 	MusicGenre      string   `json:"musicGenre,omitempty"`
 	Mood            []string `json:"mood,omitempty"`
 	PreferredColors []string `json:"preferredColors,omitempty"`
+
+	// ReferenceAssetID 指向一张已上传的参考图（kind=reference）。
+	//
+	// 装了 Z-Image ControlNet 权重时，它会经 Canny 边缘图真正参与采样；
+	// 否则只作为视觉输入进需求理解那次 VLM 调用。查
+	// GET /api/system/dependencies 的 capabilities.referenceImageConditioning
+	// 能知道当前是哪种。
+	ReferenceAssetID string `json:"referenceAssetId,omitempty"`
+
+	// ControlStrength 是参考图的控制强度，0–1，省略取默认 0.55。
+	ControlStrength float64 `json:"controlStrength,omitempty"`
 }
 
 type CreatePosterRequest struct {

@@ -187,6 +187,28 @@ func (s *Server) handleGenerate(
 		return
 	}
 
+	// 参考图素材不存在是调用方的问题，不是上游故障 —— 以前落到下面的
+	// 兜底分支返回 502，看起来像 ComfyUI 挂了。
+	if errors.Is(err, repository.ErrNotFound) {
+		writeError(
+			writer,
+			http.StatusNotFound,
+			"reference asset not found",
+		)
+		return
+	}
+
+	// 这套部署没装 ControlNet 权重却收到参考图：明确拒绝，不要静默丢掉参考图
+	// 然后返回一张跟它无关的图。
+	if errors.Is(err, service.ErrReferenceControlUnavailable) {
+		writeError(
+			writer,
+			http.StatusConflict,
+			err.Error(),
+		)
+		return
+	}
+
 	if err != nil {
 		writeError(writer, http.StatusBadGateway, err.Error())
 		return

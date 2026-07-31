@@ -58,6 +58,12 @@ func (s *AssetService) Upload(
 		return domain.AssetResponse{}, err
 	}
 
+	// store.Save 只管落盘，不填处理状态。不显式写的话，上传响应里
+	// processStatus 和 cutout.status 都是空字符串 —— 两个都不在各自的枚举里，
+	// 前端拿到的第一份素材数据反而是无法解释的。真实状态是"已入队待处理"。
+	asset.ProcessStatus = domain.AssetProcessStatusPending
+	asset.Cutout.Status = domain.AssetCutoutStatusPending
+
 	if err := s.repository.CreateAsset(ctx, asset); err != nil {
 		_ = s.store.Delete(asset)
 		return domain.AssetResponse{}, err

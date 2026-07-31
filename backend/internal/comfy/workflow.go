@@ -29,6 +29,46 @@ type Template struct {
 	// cfg —— 负向提示词只有在 cfg > 1 时才进入采样，cfg == 1 时引导项被约掉，
 	// 负向分支对结果没有任何影响。
 	cfg float64
+
+	// referencePatch 是 models/model_patches 下的 ControlNet 权重文件名。
+	// 为空表示这套部署没有装参考图控制的权重，参考图只能影响需求理解。
+	referencePatch string
+}
+
+// WithReferencePatch 声明参考图控制可用，并给出权重文件名。
+func (t *Template) WithReferencePatch(
+	name string,
+) *Template {
+	t.referencePatch = strings.TrimSpace(name)
+	return t
+}
+
+// ReferencePatch 返回配置的 ControlNet 权重文件名，空表示未配置。
+func (t *Template) ReferencePatch() string {
+	return t.referencePatch
+}
+
+// ReferenceControlAvailable 说明参考图能否真的影响出图。
+//
+// 需要两件东西同时就位：配置了 ControlNet 权重名，且工作流里找得到采样器
+// （注入点）。缺任何一个，参考图就退回到"只进 VLM 理解"那种状态。
+func (t *Template) ReferenceControlAvailable() bool {
+	return t.referencePatch != "" &&
+		t.samplerNodeID() != ""
+}
+
+// samplerNodeID 返回采样器节点 ID。cfg 和 seed 都长在采样器上，
+// 任一绑定都能定位它。
+func (t *Template) samplerNodeID() string {
+	if t.bindings.CFG != nil {
+		return t.bindings.CFG.NodeID
+	}
+
+	if t.bindings.Seed != nil {
+		return t.bindings.Seed.NodeID
+	}
+
+	return ""
 }
 
 func LoadTemplate(
@@ -133,6 +173,7 @@ func (t *Template) Build(
 	prompt string,
 	negativePrompt string,
 	seed int64,
+	reference ReferenceControl,
 ) (map[string]any, error) {
 	workflow, err := cloneWorkflow(t.base)
 	if err != nil {
@@ -172,6 +213,26 @@ func (t *Template) Build(
 			workflow,
 			t.bindings.CFG,
 			t.cfg,
+		); err != nil {
+			return nil, err
+		}
+	}
+
+	// 没有参考图时不注入任何节点，提交的图和以前完全一致。
+	if reference.Requested() {
+		if t.referencePatch == "" {
+			return nil, errors.New(
+				"reference control requested but no ControlNet " +
+					"patch is configured; set REFERENCE_CONTROL_PATCH",
+			)
+		}
+
+		reference.PatchName = t.referencePatch
+
+		if err := applyReferenceControl(
+			workflow,
+			t.samplerNodeID(),
+			reference,
 		); err != nil {
 			return nil, err
 		}

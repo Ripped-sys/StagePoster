@@ -192,10 +192,17 @@ func (s *PosterService) Generate(
 		return domain.GenerateResponse{}, err
 	}
 
+	reference, err := s.resolveReferenceControl(ctx, request)
+	if err != nil {
+		s.failJob(ctx, jobID, err)
+		return domain.GenerateResponse{}, err
+	}
+
 	workflow, err := s.template.Build(
 		request.Prompt,
 		request.NegativePrompt,
 		seed,
+		reference,
 	)
 	if err != nil {
 		s.failJob(ctx, jobID, err)
@@ -206,6 +213,15 @@ func (s *PosterService) Generate(
 	if err != nil {
 		s.failJob(ctx, jobID, err)
 		return domain.GenerateResponse{}, err
+	}
+
+	// 提交成功之后才落使用证据 —— 证据说的是"真的进了采样"。
+	if reference.Requested() {
+		s.recordReferenceUsage(
+			ctx,
+			request.ReferenceAssetID,
+			reference.Strength,
+		)
 	}
 
 	startedAt := time.Now().UTC()

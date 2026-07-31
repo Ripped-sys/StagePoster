@@ -67,6 +67,7 @@ func buildTestWorkflow(
 		"positive text",
 		negativePrompt,
 		42,
+		ReferenceControl{},
 	)
 	if err != nil {
 		t.Fatalf("build workflow: %v", err)

@@ -76,8 +76,11 @@ https://<当前隧道子域>.trycloudflare.com
   },
   "capabilities": {
     "negativePrompt":             { "available": true,  "node": "57:34", "cfg": 2 },
-    "referenceImageConditioning": { "available": false, "influences": ["brief_understanding"],
-                                    "reason": "workflow has no image input node; ..." },
+    "referenceImageConditioning": { "available": true,
+                                    "influences": ["brief_understanding", "diffusion_structure"],
+                                    "controlMode": "canny",
+                                    "patch": "Z-Image-Turbo-Fun-Controlnet-Union-2.1-lite-2602-8steps.safetensors",
+                                    "strength": { "default": 0.55, "min": 0.05, "max": 1 } },
     "backgroundRemoval":          { "available": false, "reason": "no background removal model wired; ..." },
     "personSimilarityMetric":     { "available": false, "reason": "no face/image embedding model installed" }
   }
@@ -114,7 +117,9 @@ https://<当前隧道子域>.trycloudflare.com
     "theme": "工业废墟中的仪式",
     "musicGenre": "post-metal",
     "mood": ["dark", "ritualistic"],
-    "preferredColors": ["oxide red", "ink black"]
+    "preferredColors": ["oxide red", "ink black"],
+    "referenceAssetId": "asset_xxx",
+    "controlStrength": 0.55
   },
   "branding": {
     "artistLogoAssetId": "asset_xxx",
@@ -125,6 +130,32 @@ https://<当前隧道子域>.trycloudflare.com
 ```
 
 `event` 里 **没有** `subtitle` 字段（副标题用 `artist`）。`branding` 可整段省略。
+
+**`visual.referenceAssetId` 是本轮新增的：参考图现在真的影响出图。**
+
+先用 `POST /api/assets`（`kind=reference`）拿到 `assetId`，再填到这里。后端会把它
+上传到 ComfyUI、过一遍 Canny 边缘检测，然后接进 Z-Image 的 ControlNet，真正参与
+采样 —— 不再是以前那样"素材传了、字段回了、像素毫无变化"。
+
+| 字段 | 说明 |
+|---|---|
+| `referenceAssetId` | 参考图素材 ID。省略则完全走原来的无参考图路径，出图和以前逐字节一致 |
+| `controlStrength` | 0.05–1，省略取 **0.55**。越高越严格照搬参考图构图 |
+
+关于强度，实测供参考：**0.75 是接近 1:1 复刻构图**（参考图里的圆环、竖柱、三道横条
+会原样出现在成品里）。想要"只借调性、构图自由"就往 0.2–0.4 调。越界值会被收进
+区间，不报错。
+
+两个错误要处理：
+- 参考图素材不存在 → **`404` `{"error":"reference asset not found"}`**
+- 这套部署没装 ControlNet 权重 → **`409`**。先读
+  `capabilities.referenceImageConditioning.available` 再决定要不要放出这个入口，
+  别等到提交才发现
+
+参考图带上之后，该素材的 `usedInStage` 会多一个 **`reference_control`**，
+`actuallyUsed` 变 `true` —— 这是参考图第一个能拿到的"影响了像素"的证据。
+
+代价：每张图约 **+10 s**（40 s 对 30 s），显存多占约 2 GB。
 
 响应即 **PosterResponse**（下面所有海报接口共用这个形状）：
 
@@ -252,10 +283,15 @@ planning_candidates → generating_candidates → validating_candidates
 ```json
 {
   "posterId": "poster_...",
+  "items": [],
   "reviews": [],
   "count": 1, "total": 2, "limit": 1, "offset": 0
 }
 ```
+
+**请读 `items`。** 这个端点原本只返回 `reviews`，和 `/api/jobs`、`/api/assets` 的
+`items` 不一致（CLAUDE.md §8 一直写的是 `items`）。现在两个键都在、内容相同，
+`reviews` 只是为了不打断已有客户端而保留的别名。
 
 ### `POST /api/posters/{posterId}/review` → `201`
 请求体可省略（空体也接受）。触发 Qwen 视觉复审一次。
@@ -485,8 +521,15 @@ Asset 现在带 `cutout`：
 "cutout": { "status": "ready", "hasAlpha": true }
 ```
 
-`status` 取值：`ready`（自带可用透明通道）、`opaque`（完全不透明，会以矩形压在海报上）、
-`unsupported`（还没处理）、`failed`（解码失败）。
+`status` 取值：`pending`（刚上传，透明度检查还在异步队列里）、`ready`（自带可用透明
+通道）、`opaque`（完全不透明，会以矩形压在海报上）、`unsupported`（这一步不会跑）、
+`failed`（解码失败）。
+
+`pending` 和 `unsupported` 含义相反，别混用：`pending` 再查一次就有结果，
+`unsupported` 查一万次也不会变。**上传响应（`POST /api/assets`）里
+`processStatus` 和 `cutout.status` 一定是 `pending`** —— 处理是异步的，真实结果要
+再 `GET /api/assets/{assetId}` 拿。这两个字段以前在上传响应里是空字符串（不在任何
+枚举里），现在不会了。
 
 ### `GET /api/assets/{assetId}` → `200` Asset ／ `404`
 
@@ -533,6 +576,7 @@ job id 解析上，返回 `404 {"error":"job not found"}`。
 - **任务级 metrics**：`GET /api/posters/{id}/timeline` 返回累计轮数 / token / 复审耗时 / 墙上时间
 - **子阶段进度与 ETA**：`progress.stage` / `percent` / `elapsedSeconds` / `etaSeconds`
 - **能力矩阵**：`GET /api/system/dependencies` 的 `capabilities` 如实报告哪些能力没接通
+- **参考图真正参与生成**：参考图经 Canny 边缘图接进 Z-Image ControlNet（`ZImageFunControlnet` + `ModelPatchLoader`）。同 seed、同 prompt，只加参考图，出图哈希不同且构图跟随参考图（实测：参考图的圆环 / 竖柱 / 三道横条在成品里都能对上）
 
 ### 未实现 —— 前端不要依赖
 
@@ -541,7 +585,6 @@ job id 解析上，返回 `404 {"error":"job not found"}`。
 
 | 项 | 现状 | 卡在哪 |
 |---|---|---|
-| **参考图条件化（进扩散过程）** | `capabilities.referenceImageConditioning.available = false`。参考图**只**影响需求理解那次 VLM 调用（每次请求最多一张图），不进入扩散 | 工作流里没有任何图像输入节点；`ComfyUI/models/` 下 `clip_vision` / `controlnet` / `style_models` 全是空的，也没有 IPAdapter 目录和自定义节点包；本环境网络在自签名证书代理后面，下不了模型 |
 | **背景去除 / 抠图** | `capabilities.backgroundRemoval.available = false`。`/api/assets/{id}/process` 的 `background_removal` 步骤现在如实返回 `skipped` | 没有 rembg / matting 模型。合成器只按素材自带 alpha 叠加（`xDraw.Over`），不会自己抠背景 |
 | **人物相似度指标** | `capabilities.personSimilarityMetric.available = false` | 没有人脸 / 图像嵌入模型 |
 
@@ -563,6 +606,14 @@ job id 解析上，返回 `404 {"error":"job not found"}`。
    （单测覆盖了这几条路径）。真实复审样本上的效果还需要观察。
 4. **艺术家名偶尔和主视觉主体挤在一起**（本轮实测的成品里 "Vela" 压在王座底座上）。
    属于 `RECOMPOSE` 能处理的排版类问题。
+5. **参考图那条路径的出图不可复现**。同 seed、同 prompt、同参考图，两次跑出来的
+   哈希不同（无参考图那条是稳定可复现的）。ControlNet 在这块 ROCm 卡上的归约不保证
+   确定性。前端不要假设"同样的输入必然拿到同一张图"。
+6. **带图的 VLM 请求曾经稳定 500，已修**。vLLM 默认开 4GB 多模态预处理缓存，跑一段
+   时间后会把自己搞坏（`AssertionError: Expected a cached item for mm_hash=...`），
+   表现是"会话一旦附了素材就必失败"，纯文本请求正常。现在启动参数加了
+   `--mm-processor-cache-gb 0`。**如果之后又见到附素材必 500，先确认 vLLM 是不是用
+   老参数起来的。**
 
 ## 7. 前端接入清单
 
@@ -580,5 +631,9 @@ job id 解析上，返回 `404 {"error":"job not found"}`。
     不要靠猜或硬编码
 11. 列表接口翻页用 `?limit=&offset=`；越界会返回 **400** 而不是静默截断。用
     `offset + count < total` 判断还有没有下一页
-12. logo 请上传**透明 PNG**。上传后看 `cutout.hasAlpha`：`false` 表示这个 logo 会以
+12. 参考图先 `POST /api/assets`（`kind=reference`）拿 `assetId`，再填进
+    `visual.referenceAssetId`。放这个入口之前先读
+    `capabilities.referenceImageConditioning.available`；`controlStrength` 默认
+    0.55，**0.75 已经接近 1:1 复刻构图**，想要"只借调性"往 0.2–0.4 调
+13. logo 请上传**透明 PNG**。上传后看 `cutout.hasAlpha`：`false` 表示这个 logo 会以
     不透明矩形压在海报上（后端不会替你抠背景）

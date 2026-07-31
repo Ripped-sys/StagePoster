@@ -127,11 +127,14 @@ func (s *Service) RegenerateFromReview(
 
 	generation, err := s.core.Generate(
 		ctx,
-		domain.GenerateRequest{
-			Prompt:         prompt,
-			NegativePrompt: negativePrompt,
-			Seed:           &nextSeed,
-		},
+		applyReferenceControl(
+			domain.GenerateRequest{
+				Prompt:         prompt,
+				NegativePrompt: negativePrompt,
+				Seed:           &nextSeed,
+			},
+			visualBriefFrom(posterRecord),
+		),
 	)
 	if err != nil {
 		return fmt.Errorf(

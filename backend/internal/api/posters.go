@@ -12,6 +12,7 @@ import (
 	"github.com/Ripped-sys/StagePoster/backend/internal/domain"
 	posterflow "github.com/Ripped-sys/StagePoster/backend/internal/poster"
 	"github.com/Ripped-sys/StagePoster/backend/internal/repository"
+	"github.com/Ripped-sys/StagePoster/backend/internal/service"
 )
 
 func (s *Server) handlePosters(
@@ -77,6 +78,27 @@ func (s *Server) handlePosters(
 		writeError(
 			writer,
 			http.StatusBadRequest,
+			err.Error(),
+		)
+		return
+
+	// visual.referenceAssetId 指向不存在的素材：调用方的问题，不是 500。
+	case errors.Is(err, repository.ErrNotFound):
+		writeError(
+			writer,
+			http.StatusNotFound,
+			"reference asset not found",
+		)
+		return
+
+	// 带了参考图但这套部署没装 ControlNet 权重。明确拒绝，不静默降级。
+	case errors.Is(
+		err,
+		service.ErrReferenceControlUnavailable,
+	):
+		writeError(
+			writer,
+			http.StatusConflict,
 			err.Error(),
 		)
 		return

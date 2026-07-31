@@ -128,6 +128,27 @@ func main() {
 		)
 	}
 
+	// 参考图控制需要一份 Z-Image ControlNet 权重放在
+	// ComfyUI/models/model_patches 下。没配就退回到"参考图只影响需求理解"，
+	// 并在启动日志和 capabilities 里如实说明。
+	template = template.WithReferencePatch(
+		os.Getenv("REFERENCE_CONTROL_PATCH"),
+	)
+
+	if template.ReferenceControlAvailable() {
+		log.Printf(
+			"reference image conditioning active: patch=%s",
+			template.ReferencePatch(),
+		)
+	} else {
+		log.Printf(
+			"reference image conditioning unavailable " +
+				"(set REFERENCE_CONTROL_PATCH to a file in " +
+				"ComfyUI/models/model_patches); reference images " +
+				"will only affect brief understanding",
+		)
+	}
+
 	// 负向提示词一直被算出来、存进库、在 API 里返回，但工作流没有负向文本节点
 	// 且 cfg == 1，提交给 ComfyUI 的图其实完全没受影响。静默失效比报错更难查，
 	// 所以启动时把实际状态打出来。

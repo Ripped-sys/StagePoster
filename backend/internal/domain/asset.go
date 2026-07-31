@@ -53,16 +53,28 @@ const (
 
 	// AssetCutoutStatusFailed：透明度检查本身失败（解码不了等）。
 	AssetCutoutStatusFailed AssetCutoutStatus = "failed"
+
+	// AssetCutoutStatusPending：素材刚上传，透明度检查还排在异步队列里。
+	//
+	// 上传响应以前在这里返回空字符串 —— 既不在枚举里，也没法和 unsupported
+	// 区分。而这两者含义完全相反：unsupported 是"这步不会跑"，pending 是"这步
+	// 马上就跑，稍后再查会变成 ready/opaque"。
+	AssetCutoutStatusPending AssetCutoutStatus = "pending"
 )
 
-// NormalizeAssetCutoutStatus 把空值和未知值折叠成 unsupported。
+// NormalizeAssetCutoutStatus 把未知值折叠成 unsupported。
+//
+// 空字符串来自 cutout_status 列加上之前写入的历史行，那些素材确实没跑过抠图，
+// 折叠成 unsupported 是对的；pending 则必须原样保留，否则刚上传的素材会被谎报
+// 成"不支持"，而它下一秒就会变成 ready。
 func NormalizeAssetCutoutStatus(
 	status AssetCutoutStatus,
 ) AssetCutoutStatus {
 	switch status {
 	case AssetCutoutStatusReady,
 		AssetCutoutStatusOpaque,
-		AssetCutoutStatusFailed:
+		AssetCutoutStatusFailed,
+		AssetCutoutStatusPending:
 		return status
 
 	default:

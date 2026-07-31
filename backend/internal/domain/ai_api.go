@@ -47,8 +47,15 @@ type PosterReviewResponse struct {
 }
 
 type PosterReviewListResponse struct {
-	PosterID string               `json:"posterId"`
-	Reviews  []PosterReviewRecord `json:"reviews"`
+	PosterID string `json:"posterId"`
+
+	// Items 是分页信封的统一字段名，和 /api/jobs、/api/assets 对齐。
+	// CLAUDE.md §8 一直写的是 items，只有这个端点用了自己的 reviews。
+	Items []PosterReviewRecord `json:"items"`
+
+	// Reviews 是 Items 的历史别名，保留是为了不打断已经按它写的客户端。
+	// 新代码请读 items。
+	Reviews []PosterReviewRecord `json:"reviews"`
 
 	ListMeta
 }

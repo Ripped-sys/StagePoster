@@ -123,8 +123,11 @@ func (p *AssetProcessor) processAsset(
 		&now,
 		"",
 		"",
+		// 处理中途读到的必须还是 pending。这里以前写 unsupported，于是在
+		// processing 和最终结果之间存在一个窗口，API 对一张马上就会判定为
+		// ready 的透明图断言"抠图不支持"。
 		domain.AssetCutout{
-			Status: domain.AssetCutoutStatusUnsupported,
+			Status: domain.AssetCutoutStatusPending,
 		},
 	); err != nil {
 		return fmt.Errorf("mark asset processing: %w", err)

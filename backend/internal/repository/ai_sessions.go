@@ -963,6 +963,125 @@ func (r *Repository) MarkAISessionAssetsUsed(
 	return nil
 }
 
+// MarkAssetUsedAcrossSessions 按素材 ID 落使用证据，不需要知道会话。
+//
+// 参考图控制发生在生成阶段：那时候只有 job 和素材，海报可能还没建出来，会话也
+// 可能压根不存在（直接调 /api/generate 或 /api/posters）。素材没绑在任何会话上
+// 时静默跳过 —— 和 MarkAISessionAssetsUsed 一样，那不是错误。
+func (r *Repository) MarkAssetUsedAcrossSessions(
+	ctx context.Context,
+	assetIDs []string,
+	stage string,
+	note string,
+) error {
+	stage = strings.TrimSpace(stage)
+
+	if stage == "" || len(assetIDs) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf(
+			"begin mark asset usage: %w",
+			err,
+		)
+	}
+	defer tx.Rollback()
+
+	for _, assetID := range assetIDs {
+		if strings.TrimSpace(assetID) == "" {
+			continue
+		}
+
+		rows, err := tx.QueryContext(
+			ctx,
+			`
+			SELECT session_id, used_in_stage
+			FROM ai_session_assets
+			WHERE asset_id = ?
+			`,
+			assetID,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"read asset usage stages: %w",
+				err,
+			)
+		}
+
+		type binding struct {
+			sessionID string
+			stages    string
+		}
+
+		var bindings []binding
+
+		for rows.Next() {
+			var sessionID string
+			var existing sql.NullString
+
+			if err := rows.Scan(
+				&sessionID,
+				&existing,
+			); err != nil {
+				rows.Close()
+				return fmt.Errorf(
+					"scan asset usage stages: %w",
+					err,
+				)
+			}
+
+			bindings = append(bindings, binding{
+				sessionID: sessionID,
+				stages:    existing.String,
+			})
+		}
+
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf(
+				"iterate asset usage stages: %w",
+				err,
+			)
+		}
+
+		rows.Close()
+
+		for _, item := range bindings {
+			if _, err := tx.ExecContext(
+				ctx,
+				`
+				UPDATE ai_session_assets
+				SET
+					used_in_stage = ?,
+					actually_used = 1,
+					usage_note = ?
+				WHERE session_id = ? AND asset_id = ?
+				`,
+				mergeUsageStages(item.stages, stage),
+				strings.TrimSpace(note),
+				item.sessionID,
+				assetID,
+			); err != nil {
+				return fmt.Errorf(
+					"mark asset usage: %w",
+					err,
+				)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf(
+			"commit asset usage: %w",
+			err,
+		)
+	}
+
+	return nil
+}
+
 // RecordComposedAssetUsage 由合成器的真实绘制结果驱动，按 poster_id 找到会话再
 // 落证据。找不到会话就静默返回 —— 直接走海报接口的调用方没有会话。
 func (r *Repository) RecordComposedAssetUsage(

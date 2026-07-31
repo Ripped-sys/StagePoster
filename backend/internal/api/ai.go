@@ -360,6 +360,7 @@ func (s *Server) handlePosterReviews(
 		http.StatusOK,
 		domain.PosterReviewListResponse{
 			PosterID: posterID,
+			Items:    reviews,
 			Reviews:  reviews,
 			ListMeta: domain.NewListMeta(
 				page,
@@ -563,20 +564,39 @@ func (s *Server) capabilities() map[string]any {
 		}
 	}
 
-	return map[string]any{
-		"negativePrompt": negative,
-
-		// 参考图只影响需求理解那次 VLM 调用（每次一张），不进入扩散过程。
-		// 工作流里没有任何图像输入节点，ComfyUI 侧也没有 IPAdapter /
-		// ControlNet / CLIP-Vision 模型和自定义节点包。
-		"referenceImageConditioning": map[string]any{
-			"available": false,
-			"influences": []string{
-				"brief_understanding",
-			},
-			"reason": "workflow has no image input node; " +
-				"no IPAdapter/ControlNet/CLIP-Vision model installed",
+	// 参考图条件化：装了 Z-Image ControlNet 权重时，参考图经 Canny 边缘图
+	// 真的进入采样；没装则退回到只影响需求理解那次 VLM 调用。
+	reference := map[string]any{
+		"available": false,
+		"influences": []string{
+			"brief_understanding",
 		},
+		"reason": "no Z-Image ControlNet patch configured; " +
+			"set REFERENCE_CONTROL_PATCH",
+	}
+
+	if s.service != nil {
+		if available, patch := s.service.ReferenceControlState(); available {
+			reference = map[string]any{
+				"available": true,
+				"influences": []string{
+					"brief_understanding",
+					"diffusion_structure",
+				},
+				"controlMode": "canny",
+				"patch":       patch,
+				"strength": map[string]any{
+					"default": domain.DefaultReferenceControlStrength,
+					"min":     domain.MinReferenceControlStrength,
+					"max":     domain.MaxReferenceControlStrength,
+				},
+			}
+		}
+	}
+
+	return map[string]any{
+		"negativePrompt":             negative,
+		"referenceImageConditioning": reference,
 
 		// 没有接 rembg / matting 一类的背景去除模型。合成器只按素材自带的
 		// alpha 叠加，不会自己抠背景。

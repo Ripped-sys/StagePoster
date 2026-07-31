@@ -151,10 +151,13 @@ func (s *Service) Create(
 
 		generation, err := s.core.Generate(
 			ctx,
-			domain.GenerateRequest{
-				Prompt: compiledPrompt,
-				Seed:   &seed,
-			},
+			applyReferenceControl(
+				domain.GenerateRequest{
+					Prompt: compiledPrompt,
+					Seed:   &seed,
+				},
+				request.Visual,
+			),
 		)
 		if err != nil {
 			_ = s.repository.UpdatePosterStatus(

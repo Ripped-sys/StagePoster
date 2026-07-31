@@ -415,6 +415,10 @@ func cutoutStepStatus(
 	case domain.AssetCutoutStatusFailed:
 		return domain.ProcessingStepStatusFailed
 
+	// 排队中和"不会跑"必须分开：pending 的素材再查一次就有结果了。
+	case domain.AssetCutoutStatusPending:
+		return domain.ProcessingStepStatusPending
+
 	default:
 		return domain.ProcessingStepStatusSkipped
 	}

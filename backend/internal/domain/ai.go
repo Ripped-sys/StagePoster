@@ -139,9 +139,9 @@ type ReviewScores struct {
 }
 
 type ReviewNextInstruction struct {
-	PromptAdditions []string `json:"promptAdditions"`
+	PromptAdditions StringList `json:"promptAdditions"`
 
-	NegativePromptAdditions []string `json:"negativePromptAdditions"`
+	NegativePromptAdditions StringList `json:"negativePromptAdditions"`
 
 	ComposerTemplate string `json:"composerTemplate"`
 }

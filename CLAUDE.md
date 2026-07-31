@@ -211,6 +211,7 @@ Key variables from `.env` (project root):
 | `NEGATIVE_PROMPT_NODE_ID` | `57:34` | ComfyUI negative prompt node |
 | `COMFY_CFG` | `""` | Sampler cfg override; empty keeps the workflow value (2). Negative prompts only apply when cfg > 1 |
 | `SEED_NODE_ID` | `57:3` | ComfyUI seed node |
+| `REFERENCE_CONTROL_PATCH` | `""` | Z-Image ControlNet patch filename under `ComfyUI/models/model_patches`. Enables reference-image conditioning; empty means reference images only reach the brief-understanding VLM call |
 
 ---
 
@@ -229,6 +230,16 @@ Key variables from `.env` (project root):
   polls `/history/{prompt_id}` until `completed` or `failed`.
 - Output images are in ComfyUI's output dir, copied to `STORAGE_ROOT` via
   `storage.FileStore`.
+- **Reference-image conditioning is injected, not templated.** The workflow JSON
+  has no reference nodes. When a request carries a reference asset,
+  `comfy.Template.Build` injects `LoadImage` → `Canny` → `ModelPatchLoader` →
+  `ZImageFunControlnet` into the *cloned* graph and rewires the sampler's `model`
+  input through the ControlNet. Requests without a reference produce a
+  byte-identical graph to before, which is what keeps this from regressing every
+  existing caller. Do not move these nodes into the template file.
+- The reference image must reach ComfyUI first: `comfy.Client.UploadImage` posts
+  to `/upload/image` rather than writing into ComfyUI's `input/` directory, so a
+  containerized or remote ComfyUI keeps working.
 
 ### SQLite
 - Uses `modernc.org/sqlite` (pure Go, no CGO).

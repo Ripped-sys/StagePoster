@@ -116,6 +116,13 @@ const (
 
 	// AISessionAssetStageLogoOverlay：素材被合成器真正画进了最终海报。
 	AISessionAssetStageLogoOverlay AISessionAssetStage = "logo_overlay"
+
+	// AISessionAssetStageReferenceControl：素材作为 Canny 结构参考接进了
+	// Z-Image 的 ControlNet，真的参与了采样。
+	//
+	// 这是参考图第一个能拿到的"影响出图"证据。在此之前参考图只能拿到 brief ——
+	// 只进需求理解那次 VLM 调用，对像素没有任何影响。
+	AISessionAssetStageReferenceControl AISessionAssetStage = "reference_control"
 )
 
 type AISessionAssetRecord struct {
