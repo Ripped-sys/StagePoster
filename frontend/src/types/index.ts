@@ -7,4 +7,29 @@ export interface OutputOptions{poster:boolean;teaser:boolean;vj:boolean}
 export interface PosterProject{id:string;scene?:SceneType;posterLanguage?:PosterLanguage;title:string;titleEn?:string;theme:string;themeEn?:string;dateTime:string;city:string;cityEn?:string;venue:string;venueEn?:string;subject:string;subjectEn?:string;price:string;ticketInfo:string;ticketInfoEn?:string;bands:Participant[];speakerName:string;speakerBio:string;organizer:string;assets:Partial<Record<'venue'|'qr'|'reference'|'speaker'|'organizerLogo',UploadedAsset>>;styleId:string;outputs:OutputOptions;visualSeed:number;createdAt:string}
 export type GenerationStatus='waiting'|'running'|'done';
 export interface GenerationMetrics{gpu:string;rocm:string;resolution:string;duration:string;peakVram:string}
-export interface GenerationTask{id:string;projectId:string;step:number;progress:number;status:'running'|'complete'|'failed';startedAt:number;metrics:GenerationMetrics;outputUrl?:string;error?:string;source?:'w7900'|'local'}
+export interface GenerationCandidate{
+  candidateId:string;
+  variantKey:string;
+  variantName:string;
+  status:string;
+  selected:boolean;
+  attempt:number;
+  imageUrl?:string;
+  spec?:{motif?:string;composition?:string;camera?:string;materials?:string[];palette?:string[];lighting?:string};
+}
+export interface GenerationTask{
+  id:string;
+  projectId:string;
+  step:number;
+  progress:number;
+  status:'running'|'complete'|'failed';
+  startedAt:number;
+  metrics:GenerationMetrics;
+  outputUrl?:string;
+  error?:string;
+  source?:'w7900'|'local';
+  remoteStatus?:string;
+  candidates?:GenerationCandidate[];
+  elapsedSeconds?:number;
+  etaSeconds?:number;
+}

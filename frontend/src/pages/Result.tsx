@@ -117,7 +117,7 @@ export default function Result() {
     let url = "";
     let active = true;
     setImageError("");
-    posterApi.resultBlob(task.id).then((blob) => {
+    posterApi.resultBlob(task).then((blob) => {
       if (active) {
         url = URL.createObjectURL(blob);
         setImageUrl(url);
@@ -229,7 +229,7 @@ export default function Result() {
             <CheckCircle2 /> 生成完成{" "}
             <span>
               {task?.source === "w7900"
-                ? "AMD W7900 实际输出"
+                ? "AMD W7900 主视觉 · 精确信息层"
                 : "本地 Mock 输出"}
             </span>
           </div>
@@ -311,7 +311,7 @@ export default function Result() {
           {tab === "edit" && (
             <div className="tab-content">
               <p>
-                文字修改继续保存在项目中；真实输出图目前由 GPU 服务直接返回。
+                文字修改会即时更新精确信息图层；GPU 只提供无字主视觉。
               </p>
               <label className="field">
                 <span>{posterCopy.language === "en" ? "活动标题 / TITLE" : "活动标题"}</span>

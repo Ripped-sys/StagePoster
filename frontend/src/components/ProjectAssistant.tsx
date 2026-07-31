@@ -281,7 +281,11 @@ export default function ProjectAssistant({project, onApply}: {
         });
 
         if (binding.kind === 'logo') {
-          const inspected = await aiSessionApi.getAsset(assetId);
+          let inspected = await aiSessionApi.getAsset(assetId);
+          for (let attempt = 0; inspected.cutout?.status === 'pending' && attempt < 4; attempt += 1) {
+            await new Promise((resolve) => window.setTimeout(resolve, 1200));
+            inspected = await aiSessionApi.getAsset(assetId);
+          }
           if (inspected.cutout?.status === 'opaque' || inspected.cutout?.hasAlpha === false) {
             warnings.push(`${binding.asset.name} 没有透明通道，将以矩形底图叠加；建议换成透明 PNG。`);
           } else if (inspected.cutout?.status === 'pending') {
