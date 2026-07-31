@@ -184,6 +184,22 @@ export interface BackendHealth {
   vlm?: {status?: string; model?: string; sleeping?: boolean};
 }
 
+export interface BackendCapability {
+  available: boolean;
+  reason?: string;
+  influences?: string[];
+}
+
+export interface BackendDependencies {
+  status: string;
+  capabilities?: {
+    backgroundRemoval?: BackendCapability;
+    personSimilarityMetric?: BackendCapability;
+    referenceImageConditioning?: BackendCapability;
+    negativePrompt?: BackendCapability & {cfg?: number; node?: string};
+  };
+}
+
 const configuredBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)
   ?? (import.meta.env.VITE_API_URL as string | undefined)
   ?? 'http://127.0.0.1:8080';
@@ -246,6 +262,7 @@ export function absoluteAIImageUrl(path?: string): string | undefined {
 
 export const aiSessionApi = {
   health: () => request<BackendHealth>('/health'),
+  dependencies: () => request<BackendDependencies>('/api/system/dependencies'),
   create: (brief?: AISessionBrief, assets?: {assetId: string; purpose: string}[]) => request<AISession>('/api/ai/sessions', {
     method: 'POST',
     body: JSON.stringify({brief: brief ?? {

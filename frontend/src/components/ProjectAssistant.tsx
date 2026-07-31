@@ -2,7 +2,14 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import {Bot, Check, CornerDownLeft, Download, LoaderCircle, Maximize2, RefreshCw, Send, Sparkles, UserRound, X} from 'lucide-react';
 import {toPng} from 'html-to-image';
 import type {Participant, PosterProject, UploadedAsset} from '../types';
-import {absoluteAIImageUrl, aiSessionApi, type AISession, type AISessionBrief, type BackendHealth} from '../services/aiSessionApi';
+import {
+  absoluteAIImageUrl,
+  aiSessionApi,
+  type AISession,
+  type AISessionBrief,
+  type BackendDependencies,
+  type BackendHealth,
+} from '../services/aiSessionApi';
 import AssetUpload from './AssetUpload';
 import PosterLanguageToggle from './PosterLanguageToggle';
 import {localizedPosterCopy} from '../utils/posterLanguage';
@@ -178,6 +185,7 @@ export default function ProjectAssistant({project, onApply}: {
   const [uploadProgress, setUploadProgress] = useState('');
   const [pendingMessage, setPendingMessage] = useState('');
   const [backendHealth, setBackendHealth] = useState<BackendHealth | null>(null);
+  const [backendDependencies, setBackendDependencies] = useState<BackendDependencies | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const publishRef = useRef<HTMLDivElement>(null);
@@ -195,6 +203,7 @@ export default function ProjectAssistant({project, onApply}: {
 
   useEffect(() => {
     aiSessionApi.health().then(setBackendHealth).catch(() => setBackendHealth(null));
+    aiSessionApi.dependencies().then(setBackendDependencies).catch(() => setBackendDependencies(null));
   }, []);
 
   useEffect(() => {
@@ -392,6 +401,24 @@ export default function ProjectAssistant({project, onApply}: {
       <div><small>阶段</small><b>{session.generationStages?.find((stage) => stage.status === 'running')?.label ?? session.status}</b></div>
       <div><small>进度</small><b>{session.poster ? `${session.poster.progress.completed}/${session.poster.progress.total}` : '等待任务'}</b></div>
     </div>}
+    {backendDependencies?.capabilities && <details className="assistant-capabilities">
+      <summary>
+        <span>生成能力检查</span>
+        <small>{backendDependencies.status === 'healthy' ? '后端在线' : backendDependencies.status}</small>
+      </summary>
+      <div>
+        {([
+          ['负向提示词', backendDependencies.capabilities.negativePrompt],
+          ['人物 / Logo 抠图', backendDependencies.capabilities.backgroundRemoval],
+          ['人物相似度', backendDependencies.capabilities.personSimilarityMetric],
+          ['参考图条件化', backendDependencies.capabilities.referenceImageConditioning],
+        ] as const).map(([label, capability]) => capability && <p key={label}>
+          <b className={capability.available ? 'ok' : 'muted'}>{capability.available ? '可用' : '未接入'}</b>
+          <span>{label}</span>
+          {!capability.available && capability.reason && <small title={capability.reason}>{capability.reason}</small>}
+        </p>)}
+      </div>
+    </details>}
 
     <div className="assistant-messages" ref={messagesRef} aria-live="polite">
       {!session?.messages.length && <div className="assistant-message assistant"><i><Bot/></i><p>告诉我演出、活动或品牌故事。我会逐步追问，并由后端 AI 生成可确认的设计方案。</p></div>}
