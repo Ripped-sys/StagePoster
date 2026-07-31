@@ -14,6 +14,7 @@ function captureErrors(page: Page) {
 }
 
 test('desktop poster MVP remains usable with live agent integration', async ({page}) => {
+  test.skip(process.env.RUN_LIVE_E2E !== '1', 'Set RUN_LIVE_E2E=1 for the several-minute public GPU flow');
   // A cold W7900/ComfyUI run can take several minutes over the public tunnel.
   test.setTimeout(480_000);
   const errors = captureErrors(page);

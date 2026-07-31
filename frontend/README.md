@@ -44,7 +44,7 @@ pnpm exec playwright test tests/live-session.spec.ts
 - `/create`：四步创建工作台与对话式项目助手
 - `/create?demo=1`：长安双雄演示项目
 - `/create?project=:id`：继续编辑已保存项目
-- `/generate/:id`：远端任务轮询或本地 Mock 生成进度
+- `/generate/:id`：`/api/posters` 真实任务进度、分批候选图和选图合成
 - `/result/:id`：检查、编辑、性能数据和 PNG 导出
 
 ## 已实现
@@ -56,6 +56,9 @@ pnpm exec playwright test tests/live-session.spec.ts
 - 真实 AI 双向消息、缺失字段、三套设计方案和 `availableActions` 状态驱动
 - 方案确认、三张候选图轮询、AI Session 候选选择、VLM Finalize 和安全恢复
 - 人物、Logo、参考图上传到后端 `/api/assets` 并绑定 AI Session
+- 参考图 ID 与控制强度写入生成 Brief，并展示 `reference_control` 实际使用证据
+- 手动表格模式使用 `/api/posters`：202 创建、3.5 秒轮询、`partial_ready`、三候选选择和最终合成
+- 后端能力矩阵、素材透明度、完整进度、耗时和 ETA 可视化
 - AI brief 由用户确认后同步到表单，不自动覆盖最终信息
 - 选中 AI 主视觉后，用前端确定性信息层生成并导出发布版 PNG
 - 输出选项、必填校验、错误定位及素材状态保留
@@ -70,13 +73,18 @@ pnpm exec playwright test tests/live-session.spec.ts
 VITE_API_BASE_URL=https://your-stageposter-host.example.com
 ```
 
-正常业务流程全部走 `/api/ai/sessions`：创建 Session、持续发送消息、确认方案、轮询三张候选图、选择候选、Finalize、下载最终图。按钮只根据后端 `availableActions` 显示，图片相对路径统一拼接 `VITE_API_BASE_URL`。素材先上传 `/api/assets`，再绑定到 Session。
+两条正式业务入口都已接入：
+
+- 手动表格：`POST /api/posters` → 轮询 Poster → 选择候选 → 前端精确信息图层 → PNG。
+- AI 对话：创建 `/api/ai/sessions` → 持续消息 → 确认方案 → 三候选 → 选择 → Finalize。
+
+会话按钮只根据后端 `availableActions` 显示；`partial_ready` 会继续轮询到 `awaiting_selection`。图片相对路径统一拼接 `VITE_API_BASE_URL`。参考图先上传 `/api/assets`，然后将 `referenceAssetId` 和 `controlStrength` 写入 `visual`。
 
 ## 仍为 Mock 或规划中
 
 - 四步工作台原有的“AI 帮我推荐”按钮仍是本地风格规则；右侧 AI Creative Agent 已是真实后端对话
-- `/generate/:id` 旧流程在无 Token 时仍保留本地 Mock，真实完整流程位于 `/create` 的 AI Creative Agent
-- 人物与参考图可以上传和绑定，但当前后端候选生成尚未证明具备严格身份保持/人物抠图能力
+- 人物素材可以参与 Brief 理解，但后端能力矩阵仍显示人物身份保持/相似度度量不可用
+- 后端不会自动抠图；不透明 Logo 会在上传后明确提示矩形底图风险
 - 后端中文字体缺字、长信息拥挤和默认票务文案问题由前端“精确信息发布版”规避；后端原始结果仍可展开审查
 - 5–8 秒宣传片为 P1 规划能力，必须由用户主动选择
 - VJ 动态视觉为 P2，当前禁用
