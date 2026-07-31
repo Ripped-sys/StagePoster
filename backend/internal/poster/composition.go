@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -14,6 +16,13 @@ import (
 
 var ErrResultNotReady = errors.New(
 	"poster result is not ready",
+)
+
+// ErrOutputMissing 表示 poster_outputs 里有记录，但磁盘上的文件不在了。
+// 以前这里直接把 *fs.PathError 包出去，处理器落到默认分支返回 500，并把
+// 服务器绝对路径原样写进响应体。对客户端来说文件没了就是 404，路径不该外泄。
+var ErrOutputMissing = errors.New(
+	"poster output file is missing",
 )
 
 type CompositionEngine interface {
@@ -218,6 +227,21 @@ func (s *Service) composePoster(
 
 	now := time.Now().UTC()
 
+	// 使用证据来自合成器真正画上去的素材，不是"我们传了哪些素材"。
+	// StoragePath 为空的素材会被静默跳过，两者并不等价。
+	if err := s.repository.RecordComposedAssetUsage(
+		ctx,
+		posterRecord.ID,
+		result.UsedAssetIDs,
+	); err != nil {
+		// 证据落库失败不该毁掉一张已经合成好的海报。
+		log.Printf(
+			"poster %s: record asset usage: %v",
+			posterRecord.ID,
+			err,
+		)
+	}
+
 	finalID, err := domain.NewID("poster_output_")
 	if err != nil {
 		return err
@@ -361,11 +385,20 @@ func (s *Service) openOutput(
 
 	file, err := os.Open(output.StoragePath)
 	if err != nil {
+		// 路径只进日志，不进响应体。
+		log.Printf(
+			"poster %s output %s unreadable: %v",
+			posterID,
+			kind,
+			err,
+		)
+
+		if errors.Is(err, fs.ErrNotExist) {
+			return ComposedFile{}, ErrOutputMissing
+		}
+
 		return ComposedFile{},
-			fmt.Errorf(
-				"open composed poster: %w",
-				err,
-			)
+			errors.New("poster output is unreadable")
 	}
 
 	return ComposedFile{

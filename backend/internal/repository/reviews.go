@@ -158,14 +158,36 @@ func (r *Repository) CreatePosterReview(
 	return nil
 }
 
+// CountPosterReviews 返回某张海报的复审总轮数。
+func (r *Repository) CountPosterReviews(
+	ctx context.Context,
+	posterID string,
+) (int, error) {
+	var total int
+
+	if err := r.db.QueryRowContext(
+		ctx,
+		`
+		SELECT COUNT(*)
+		FROM poster_reviews
+		WHERE poster_id = ?
+		`,
+		posterID,
+	).Scan(&total); err != nil {
+		return 0, fmt.Errorf(
+			"count poster reviews: %w",
+			err,
+		)
+	}
+
+	return total, nil
+}
+
 func (r *Repository) ListPosterReviews(
 	ctx context.Context,
 	posterID string,
-	limit int,
+	page domain.Page,
 ) ([]domain.PosterReviewRecord, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
 
 	rows, err := r.db.QueryContext(
 		ctx,
@@ -187,10 +209,11 @@ func (r *Repository) ListPosterReviews(
 		FROM poster_reviews
 		WHERE poster_id = ?
 		ORDER BY round DESC
-		LIMIT ?
+		LIMIT ? OFFSET ?
 		`,
 		posterID,
-		limit,
+		page.Limit,
+		page.Offset,
 	)
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -203,7 +226,7 @@ func (r *Repository) ListPosterReviews(
 	reviews := make(
 		[]domain.PosterReviewRecord,
 		0,
-		limit,
+		page.Limit,
 	)
 
 	for rows.Next() {
@@ -324,4 +347,56 @@ func scanPosterReview(
 	}
 
 	return review, nil
+}
+
+// AggregatePosterReviewMetrics 汇总一张海报所有复审轮次的 token 与耗时。
+//
+// 每轮的 model / prompt_tokens / completion_tokens / latency_ms 一直在写库，
+// 但没有任何地方把它们加起来 —— AIMetricsResponse 的作用域只有单次 LLM 调用，
+// 想知道"这张海报一共烧了多少"完全无从查起。
+func (r *Repository) AggregatePosterReviewMetrics(
+	ctx context.Context,
+	posterID string,
+) (domain.PosterMetrics, error) {
+	var metrics domain.PosterMetrics
+
+	var promptTokens sql.NullInt64
+	var completionTokens sql.NullInt64
+	var latencyMS sql.NullInt64
+	var rounds sql.NullInt64
+
+	err := r.db.QueryRowContext(
+		ctx,
+		`
+		SELECT
+			COUNT(*),
+			SUM(prompt_tokens),
+			SUM(completion_tokens),
+			SUM(latency_ms)
+		FROM poster_reviews
+		WHERE poster_id = ?
+		`,
+		posterID,
+	).Scan(
+		&rounds,
+		&promptTokens,
+		&completionTokens,
+		&latencyMS,
+	)
+	if err != nil {
+		return domain.PosterMetrics{}, fmt.Errorf(
+			"aggregate poster review metrics: %w",
+			err,
+		)
+	}
+
+	metrics.ReviewRounds = int(rounds.Int64)
+	metrics.PromptTokens = int(promptTokens.Int64)
+	metrics.CompletionTokens = int(completionTokens.Int64)
+	metrics.ReviewLatencyMS = latencyMS.Int64
+
+	metrics.TotalTokens = metrics.PromptTokens +
+		metrics.CompletionTokens
+
+	return metrics, nil
 }

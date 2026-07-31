@@ -104,6 +104,20 @@ func (purpose AISessionAssetPurpose) Valid() bool {
 	}
 }
 
+// AISessionAssetStage 是 ai_session_assets.used_in_stage 的取值。字段注释里
+// 一直写着 plan / candidate / logo_overlay / review，但没有常量，也没有任何
+// 代码写入过。
+type AISessionAssetStage = string
+
+const (
+	// AISessionAssetStageBrief：素材作为视觉输入进了需求理解那次 VLM 调用。
+	// vLLM 当前每次请求只接一张图，所以一轮里最多一个素材拿到这个标记。
+	AISessionAssetStageBrief AISessionAssetStage = "brief"
+
+	// AISessionAssetStageLogoOverlay：素材被合成器真正画进了最终海报。
+	AISessionAssetStageLogoOverlay AISessionAssetStage = "logo_overlay"
+)
+
 type AISessionAssetRecord struct {
 	SessionID    string                `json:"sessionId"`
 	AssetID      string                `json:"assetId"`
@@ -118,7 +132,7 @@ type AISessionAssetRecord struct {
 
 	// Usage tracking
 	UsedInStage  []string `json:"usedInStage,omitempty"` // plan / candidate / logo_overlay / review
-	ActuallyUsed bool     `json:"actuallyUsed"`         // 实际参与生成
+	ActuallyUsed bool     `json:"actuallyUsed"`          // 实际参与生成
 	UsageNote    string   `json:"usageNote,omitempty"`   // 简要说明
 
 	CreatedAt time.Time `json:"createdAt"`
@@ -136,6 +150,10 @@ type AIBriefAgentResult struct {
 	Reply  string      `json:"reply"`
 	Event  EventBrief  `json:"event"`
 	Visual VisualBrief `json:"visual"`
+
+	// VisionAssetID 是本轮真正附到 VLM 请求上的素材。服务端填写，不来自模型
+	// 输出，所以 json:"-"。vLLM 当前每次请求只接一张图。
+	VisionAssetID string `json:"-"`
 }
 
 type AIAssistAsset struct {

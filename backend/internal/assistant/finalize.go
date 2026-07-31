@@ -81,10 +81,13 @@ func (s *Service) Finalize(
 	}
 
 	for {
-		reviews, err := s.posterFlow.ListReviews(
+		reviews, _, err := s.posterFlow.ListReviews(
 			ctx,
 			session.PosterID,
-			100,
+			domain.NormalizePage(
+				domain.MaxPageLimit,
+				0,
+			),
 		)
 		if err != nil {
 			return domain.AISessionResponse{}, err

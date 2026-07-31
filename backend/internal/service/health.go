@@ -15,10 +15,10 @@ import (
 type HealthInfo struct {
 	Status string `json:"status"`
 
-	GPU      *GPUInfo      `json:"gpu,omitempty"`
-	ComfyUI  *ComfyUIInfo  `json:"comfyui,omitempty"`
-	VLM      *VLMInfo      `json:"vlm,omitempty"`
-	Runtime  *RuntimeInfo  `json:"runtime,omitempty"`
+	GPU     *GPUInfo     `json:"gpu,omitempty"`
+	ComfyUI *ComfyUIInfo `json:"comfyui,omitempty"`
+	VLM     *VLMInfo     `json:"vlm,omitempty"`
+	Runtime *RuntimeInfo `json:"runtime,omitempty"`
 
 	TokenRequired bool `json:"tokenRequired"`
 }
@@ -40,14 +40,14 @@ type ComfyUIInfo struct {
 }
 
 type VLMInfo struct {
-	Status      string `json:"status,omitempty"`
-	Model       string `json:"model,omitempty"`
-	DType       string `json:"dtype,omitempty"`
-	Sleeping    bool   `json:"sleeping,omitempty"`
-	ColdStartMS int64  `json:"coldStartMs,omitempty"`
-	InferenceMS int64  `json:"inferenceMs,omitempty"`
+	Status      string  `json:"status,omitempty"`
+	Model       string  `json:"model,omitempty"`
+	DType       string  `json:"dtype,omitempty"`
+	Sleeping    bool    `json:"sleeping,omitempty"`
+	ColdStartMS int64   `json:"coldStartMs,omitempty"`
+	InferenceMS int64   `json:"inferenceMs,omitempty"`
 	PeakVRAMGB  float64 `json:"peakVramGB,omitempty"`
-	URL         string `json:"url,omitempty"`
+	URL         string  `json:"url,omitempty"`
 }
 
 type RuntimeInfo struct {
@@ -58,10 +58,10 @@ type RuntimeInfo struct {
 
 // HealthCollector collects system health information.
 type HealthCollector struct {
-	comfyURL       string
-	vlmClient      *ai.Client
-	vlmModel       string
-	vlmSleeping    func(context.Context) (bool, error)
+	comfyURL        string
+	vlmClient       *ai.Client
+	vlmModel        string
+	vlmSleeping     func(context.Context) (bool, error)
 	workflowVersion string
 }
 
@@ -73,17 +73,17 @@ func NewHealthCollector(
 	workflowVersion string,
 ) *HealthCollector {
 	return &HealthCollector{
-		comfyURL:       comfyURL,
-		vlmClient:      vlmClient,
-		vlmModel:       vlmModel,
-		vlmSleeping:    vlmSleeping,
+		comfyURL:        comfyURL,
+		vlmClient:       vlmClient,
+		vlmModel:        vlmModel,
+		vlmSleeping:     vlmSleeping,
 		workflowVersion: workflowVersion,
 	}
 }
 
 func (h *HealthCollector) Collect(ctx context.Context) HealthInfo {
 	info := HealthInfo{
-		Status:       "ok",
+		Status:        "ok",
 		TokenRequired: false,
 	}
 

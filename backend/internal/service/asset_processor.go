@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -120,6 +123,9 @@ func (p *AssetProcessor) processAsset(
 		&now,
 		"",
 		"",
+		domain.AssetCutout{
+			Status: domain.AssetCutoutStatusUnsupported,
+		},
 	); err != nil {
 		return fmt.Errorf("mark asset processing: %w", err)
 	}
@@ -128,12 +134,16 @@ func (p *AssetProcessor) processAsset(
 	var analysisJSON string
 	var processErr error
 
+	cutout := domain.AssetCutout{
+		Status: domain.AssetCutoutStatusUnsupported,
+	}
+
 	switch kind {
 	case domain.AssetKindLogo:
-		maskPath, processErr = p.processLogo(ctx, assetID)
+		cutout, processErr = p.inspectCutout(ctx, assetID)
 
 	case domain.AssetKindPerson:
-		maskPath, processErr = p.processPerson(ctx, assetID)
+		cutout, processErr = p.inspectCutout(ctx, assetID)
 
 	case domain.AssetKindReference:
 		_, analysisJSON, processErr = p.processReference(ctx, assetID)
@@ -159,31 +169,77 @@ func (p *AssetProcessor) processAsset(
 		processedAt,
 		maskPath,
 		analysisJSON,
+		cutout,
 	)
 }
 
-func (p *AssetProcessor) processLogo(
+// inspectCutout 报告抠图 / 透明化的真实状态。
+//
+// 这里替换掉了原来的 generateMask：那个函数把源文件逐字节复制成
+// mask_<id>.png 就宣告成功，谁都没消费过它，合成器根本看不到蒙版。现在不再
+// 伪造蒙版，而是做一件真能做的事 —— 实测 alpha 通道。
+//
+// 合成器只按已有 alpha 叠加（xDraw.Over），自己不抠背景。所以一个不透明的
+// logo 会以矩形压在海报上，这件事必须让调用方看得见。
+func (p *AssetProcessor) inspectCutout(
 	ctx context.Context,
 	assetID string,
-) (string, error) {
+) (domain.AssetCutout, error) {
 	asset, err := p.repository.GetAsset(ctx, assetID)
 	if err != nil {
-		return "", err
+		return domain.AssetCutout{
+			Status: domain.AssetCutoutStatusUnsupported,
+		}, err
 	}
 
-	return generateMask(asset)
+	hasAlpha, err := imageHasAlpha(asset.StoragePath)
+	if err != nil {
+		return domain.AssetCutout{
+			Status: domain.AssetCutoutStatusFailed,
+		}, fmt.Errorf("inspect alpha channel: %w", err)
+	}
+
+	status := domain.AssetCutoutStatusOpaque
+	if hasAlpha {
+		status = domain.AssetCutoutStatusReady
+	}
+
+	return domain.AssetCutout{
+		Status:   status,
+		HasAlpha: hasAlpha,
+	}, nil
 }
 
-func (p *AssetProcessor) processPerson(
-	ctx context.Context,
-	assetID string,
-) (string, error) {
-	asset, err := p.repository.GetAsset(ctx, assetID)
+// imageHasAlpha 解码图片并查找任何非全不透明的像素。
+// 逐像素扫描，遇到第一个透明像素就返回，最坏情况才走满整张图。
+func imageHasAlpha(path string) (bool, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return false, err
+	}
+	defer file.Close()
+
+	decoded, _, err := image.Decode(file)
+	if err != nil {
+		return false, err
 	}
 
-	return generateMask(asset)
+	if opaque, ok := decoded.(interface{ Opaque() bool }); ok {
+		// Go 标准库的多数图像类型提供 Opaque()，比逐像素快得多。
+		return !opaque.Opaque(), nil
+	}
+
+	bounds := decoded.Bounds()
+
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if _, _, _, alpha := decoded.At(x, y).RGBA(); alpha < 0xffff {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
 }
 
 func (p *AssetProcessor) processReference(
@@ -209,19 +265,6 @@ func (p *AssetProcessor) processReference(
 	return colors, analysisJSON, nil
 }
 
-// generateMask generates a background removal mask for person/logo assets.
-// Placeholder implementation — integrate with rembg or similar for production.
-func generateMask(asset domain.Asset) (string, error) {
-	maskDir := filepath.Dir(asset.StoragePath)
-	maskPath := filepath.Join(maskDir, "mask_"+asset.ID+".png")
-
-	if err := writePlaceholderMask(asset, maskPath); err != nil {
-		return "", fmt.Errorf("generate mask: %w", err)
-	}
-
-	return maskPath, nil
-}
-
 // analyzeReference analyzes color and composition of a reference image.
 func analyzeReference(asset domain.Asset) ([]string, map[string]any, error) {
 	file, err := os.Open(asset.StoragePath)
@@ -239,34 +282,6 @@ func analyzeReference(asset domain.Asset) ([]string, map[string]any, error) {
 	}
 
 	return colors, analysis, nil
-}
-
-// writePlaceholderMask writes a copy of the source as a placeholder mask.
-// Replace with actual background removal model in production.
-func writePlaceholderMask(asset domain.Asset, maskPath string) error {
-	source, err := os.Open(asset.StoragePath)
-	if err != nil {
-		return err
-	}
-	defer source.Close()
-
-	if err := os.MkdirAll(filepath.Dir(maskPath), 0o755); err != nil {
-		return err
-	}
-
-	dest, err := os.Create(maskPath)
-	if err != nil {
-		return err
-	}
-	defer dest.Close()
-
-	_, err = io.Copy(dest, source)
-	if err != nil {
-		_ = os.Remove(maskPath)
-		return err
-	}
-
-	return dest.Sync()
 }
 
 // extractDominantColors extracts dominant colors from an image file.

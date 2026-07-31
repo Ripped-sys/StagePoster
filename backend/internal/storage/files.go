@@ -1,12 +1,15 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"io/fs"
+	"log"
 	"mime"
 	"os"
 	"path/filepath"
@@ -14,6 +17,12 @@ import (
 	"time"
 
 	"github.com/Ripped-sys/StagePoster/backend/internal/domain"
+)
+
+// ErrOutputMissing 表示 outputs 里有记录，但磁盘上的文件不在了。
+// 对调用方来说这和记录不存在等价，应当是 404 而不是 500。
+var ErrOutputMissing = errors.New(
+	"stored output file is missing",
 )
 
 type FileStore struct {
@@ -151,7 +160,17 @@ func (s *FileStore) Open(
 
 	file, err := os.Open(cleanPath)
 	if err != nil {
-		return nil, fmt.Errorf("open stored output: %w", err)
+		// 路径进日志，不进错误链 —— 上层的 500 分支会回显 err.Error()。
+		log.Printf(
+			"stored output unreadable: %v",
+			err,
+		)
+
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, ErrOutputMissing
+		}
+
+		return nil, errors.New("stored output is unreadable")
 	}
 
 	return file, nil

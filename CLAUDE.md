@@ -208,7 +208,8 @@ Key variables from `.env` (project root):
 | `POSTER_FONT_BOLD` | `""` | Bold font path |
 | `RECONCILE_INTERVAL` | `2s` | Reconciler poll interval |
 | `PROMPT_NODE_ID` | `57:27` | ComfyUI prompt node |
-| `NEGATIVE_PROMPT_NODE_ID` | `""` | ComfyUI negative prompt node |
+| `NEGATIVE_PROMPT_NODE_ID` | `57:34` | ComfyUI negative prompt node |
+| `COMFY_CFG` | `""` | Sampler cfg override; empty keeps the workflow value (2). Negative prompts only apply when cfg > 1 |
 | `SEED_NODE_ID` | `57:3` | ComfyUI seed node |
 
 ---
@@ -246,7 +247,12 @@ Key variables from `.env` (project root):
 - All POST request bodies are JSON.
 - Error responses: `{"error": "message"}` + appropriate HTTP status.
 - Success responses: `{"data": ...}` or the resource object directly.
-- Pagination: list endpoints return `items []` + `total int`.
+- Pagination: list endpoints accept `?limit=` (1–100, default 20) and
+  `?offset=` (default 0). Out-of-range values are rejected with 400 rather than
+  silently clamped. The envelope carries `items []` plus `count` (rows in this
+  page), `total` (rows in the table), `limit` and `offset`. Earlier revisions of
+  this file documented a single `total int` and no `count`; the code only ever
+  returned `count`, so both are now present and described as they are.
 - Auth: `Authorization: Bearer <POSTER_API_TOKEN>` (optional, recommended for
   production).
 
@@ -262,8 +268,12 @@ Key variables from `.env` (project root):
   `r.Context()`.
 - **Logging**: use stdlib `log`. Structured logging recommended for production.
 - **ID generation**: use `domain.NewID(prefix)` for `prefix_xxxxxxxx` format.
-- **JSON**: field names use `json:"snake_case"`. API request/response shapes are
-  consistent.
+- **JSON**: field names use `json:"camelCase"` (`posterId`, `sessionId`,
+  `createdAt`). This file previously said `snake_case`, which never matched the
+  code. API request/response shapes are consistent.
+- **Errors**: 500 responses return a generic `{"error":"internal server error"}`
+  and log the real cause server-side. Never pass `err.Error()` to the client on
+  a 500 — filesystem paths and driver internals leak that way.
 - **File paths**: read absolute paths from env vars. Never hardcode.
 
 ---

@@ -73,10 +73,10 @@ type PersonIdentityControl struct {
 }
 
 type StyleReferenceControl struct {
-	Strength        float64  `json:"strength"`         // ControlNet strength (0-1)
-	ColorConstraint []string `json:"colorConstraint"`  // 颜色约束
-	CompositionRef  bool     `json:"compositionRef"`   // 构图参考
-	MaterialRef     []string `json:"materialRef"`      // 材质参考
+	Strength        float64  `json:"strength"`        // ControlNet strength (0-1)
+	ColorConstraint []string `json:"colorConstraint"` // 颜色约束
+	CompositionRef  bool     `json:"compositionRef"`  // 构图参考
+	MaterialRef     []string `json:"materialRef"`     // 材质参考
 }
 
 type GenerationControl struct {
@@ -155,9 +155,64 @@ type PosterResponse struct {
 	UpdatedAt           time.Time           `json:"updatedAt"`
 }
 
+// PosterProgress 以前只有候选图的 completed / total 两个计数，而这个计数只在
+// 候选生成阶段动 —— composing、validating、以及整个复审循环期间它完全冻住，
+// 客户端看不出还要等多久，也不知道当前卡在哪一步。
 type PosterProgress struct {
 	Completed int `json:"completed"`
 	Total     int `json:"total"`
+
+	// Stage 是当前所处的粗粒度阶段，由状态派生，便于前端显示文案。
+	Stage string `json:"stage"`
+
+	// Percent 是整条流水线的推进比例（0-100），不只是候选生成那一段。
+	Percent int `json:"percent"`
+
+	// ElapsedSeconds 自任务创建起的实际耗时。
+	ElapsedSeconds int `json:"elapsedSeconds"`
+
+	// EtaSeconds 是剩余时间估计，取自历史上已成功海报的中位总耗时。
+	// 没有足够历史样本时省略 —— 编一个数字比不给更糟。
+	EtaSeconds *int `json:"etaSeconds,omitempty"`
+}
+
+// Terminal 表示海报流程已经结束，不会再推进。
+func (status PosterStatus) Terminal() bool {
+	switch status {
+	case PosterStatusSucceeded,
+		PosterStatusFailed,
+		PosterStatusCanceled:
+		return true
+
+	default:
+		return false
+	}
+}
+
+// posterStageWeights 是各状态对应的整体完成度。数字是按实测流水线耗时排的
+// 粗略刻度，不是精确测量；用途只是让进度条单调前进。
+var posterStageWeights = map[PosterStatus]int{
+	PosterStatusPlanning:          5,
+	PosterStatusGenerating:        20,
+	PosterStatusValidating:        55,
+	PosterStatusPartialReady:      60,
+	PosterStatusAwaitingSelection: 65,
+	PosterStatusSelected:          70,
+	PosterStatusComposing:         80,
+	PosterStatusSucceeded:         100,
+	PosterStatusFailed:            100,
+	PosterStatusCanceled:          100,
+}
+
+// StageProgress 返回某个状态对应的整体完成度。
+func StageProgress(
+	status PosterStatus,
+) int {
+	if weight, ok := posterStageWeights[status]; ok {
+		return weight
+	}
+
+	return 0
 }
 
 type SelectCandidateRequest struct {

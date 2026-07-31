@@ -260,6 +260,15 @@ func (s *Service) Get(
 		UpdatedAt:           posterRecord.UpdatedAt,
 		Progress: domain.PosterProgress{
 			Total: len(candidates),
+			Stage: string(posterRecord.Status),
+			Percent: domain.StageProgress(
+				posterRecord.Status,
+			),
+			ElapsedSeconds: int(
+				posterRecord.UpdatedAt.
+					Sub(posterRecord.CreatedAt).
+					Seconds(),
+			),
 		},
 		Candidates: make(
 			[]domain.CandidateResponse,
@@ -314,6 +323,27 @@ func (s *Service) Get(
 			"/api/posters/%s/thumbnail",
 			posterID,
 		)
+	}
+
+	// ETA 只在任务还没结束、且历史样本够多时给。估计不出来就不给字段，
+	// 而不是给 0 —— 客户端会把 0 当成"马上就好"。
+	if !posterRecord.Status.Terminal() {
+		median, ok, err := s.repository.
+			MedianPosterDurationSeconds(ctx, 3)
+		if err != nil {
+			return domain.PosterResponse{}, err
+		}
+
+		if ok {
+			remaining := median -
+				response.Progress.ElapsedSeconds
+
+			if remaining < 0 {
+				remaining = 0
+			}
+
+			response.Progress.EtaSeconds = &remaining
+		}
 	}
 
 	return response, nil

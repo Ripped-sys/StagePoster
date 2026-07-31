@@ -487,13 +487,26 @@ func (r *Repository) GetJob(
 	return job, nil
 }
 
+// CountJobs 返回 jobs 表总行数，供列表信封的 total 用。
+func (r *Repository) CountJobs(
+	ctx context.Context,
+) (int, error) {
+	var total int
+
+	if err := r.db.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*) FROM jobs`,
+	).Scan(&total); err != nil {
+		return 0, fmt.Errorf("count jobs: %w", err)
+	}
+
+	return total, nil
+}
+
 func (r *Repository) ListJobs(
 	ctx context.Context,
-	limit int,
+	page domain.Page,
 ) ([]domain.Job, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
 
 	rows, err := r.db.QueryContext(
 		ctx,
@@ -515,16 +528,17 @@ func (r *Repository) ListJobs(
 			updated_at
 		FROM jobs
 		ORDER BY created_at DESC
-		LIMIT ?
+		LIMIT ? OFFSET ?
 		`,
-		limit,
+		page.Limit,
+		page.Offset,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list jobs: %w", err)
 	}
 	defer rows.Close()
 
-	jobs := make([]domain.Job, 0, limit)
+	jobs := make([]domain.Job, 0, page.Limit)
 
 	for rows.Next() {
 		job, err := scanJob(rows)

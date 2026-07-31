@@ -8,14 +8,14 @@ type DesignComposition struct {
 }
 
 type DesignPlan struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	Concept          string            `json:"concept"`
-	Palette          []string          `json:"palette"`
-	Composition      DesignComposition `json:"composition"`
-	PositivePrompt   string            `json:"positivePrompt"`
-	NegativePrompt   string            `json:"negativePrompt"`
-	ComposerTemplate string            `json:"composerTemplate"`
+	ID               string             `json:"id"`
+	Name             string             `json:"name"`
+	Concept          string             `json:"concept"`
+	Palette          []string           `json:"palette"`
+	Composition      DesignComposition  `json:"composition"`
+	PositivePrompt   string             `json:"positivePrompt"`
+	NegativePrompt   string             `json:"negativePrompt"`
+	ComposerTemplate string             `json:"composerTemplate"`
 	Controls         *GenerationControl `json:"controls,omitempty"`
 }
 

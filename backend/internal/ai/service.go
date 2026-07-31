@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -58,7 +59,14 @@ Allowed composerTemplate values:
 - cinematic_center
 - gothic_frame`
 
-const reviewSystemPrompt = `You are StagePoster Visual Critic.
+// reviewAcceptScoreText 让提示词里的阈值直接取自 domain 常量，避免服务端裁决
+// 和告知模型的规则各写一遍字面量、改一处忘一处。
+var reviewAcceptScoreText = strconv.Itoa(
+	domain.ReviewAcceptScore,
+)
+
+// 拼了常量，所以是 var 而不是 const。
+var reviewSystemPrompt = `You are StagePoster Visual Critic.
 
 Inspect the attached final poster and compare it with the supplied event brief, visual brief and selected design plan.
 
@@ -67,10 +75,27 @@ Do not use Markdown.
 Do not use code fences.
 Use scores from 0 to 100.
 
+Every issue must declare which layer owns it. This field decides whether the
+backend re-runs image generation or only re-runs layout, so it matters more than
+the wording of the description:
+- "layer": "generation" for anything burnt into the generated key visual —
+  gibberish or malformed lettering, unwanted text, watermarks, unwanted logos,
+  wrong subject, visual artifacts, flat featureless colour blocks. The composer
+  cannot repair these; only a new generation can.
+- "layer": "composition" for anything the deterministic composer controls —
+  title placement, hierarchy, spacing, font size, information panel, contrast,
+  readability.
+- "layer": "brief" when the supplied creative direction itself is unusable.
+
+Score visualQuality strictly on the generated key visual and score composition,
+typography and readability strictly on the overlaid layout. A low visualQuality
+next to healthy layout scores tells the backend to regenerate rather than
+recompose.
+
 Decision policy:
-- ACCEPT only when totalScore is at least 82 and no hard failure exists.
-- RECOMPOSE for layout, title placement, hierarchy, spacing, font size, information panel, contrast or readability problems.
-- REGENERATE when the generated key visual contains gibberish text, malformed letters, unwanted text, watermark, unwanted logo, wrong subject or severe visual artifacts.
+- ACCEPT only when totalScore is at least ` + reviewAcceptScoreText + ` and no hard failure exists.
+- RECOMPOSE for composition-layer problems only.
+- REGENERATE for any generation-layer problem.
 - REWRITE_BRIEF only when the supplied creative direction is contradictory or unusable.
 
 Use exactly this schema:

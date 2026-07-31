@@ -437,8 +437,7 @@ func (r *Repository) BindAISessionAsset(
 	return nil
 }
 
-func (r *Repository) ListAISessionAssets(
-	ctx context.Context,
+func (r *Repository) ListAISessionAssets(ctx context.Context,
 	sessionID string,
 ) ([]domain.AISessionAssetRecord, error) {
 	rows, err := r.db.QueryContext(
@@ -870,4 +869,167 @@ func scanAIDesignPlan(
 	}
 
 	return record, nil
+}
+
+// MarkAISessionAssetsUsed 记录素材真的参与了某个阶段。
+//
+// used_in_stage / actually_used / usage_note 三列早就建好了，读取路径也在解析，
+// 但从来没有任何代码写过它们 —— 每一行都恒为 actually_used=0，而 JSON 字段没有
+// omitempty，等于对确实用过的素材主动断言"没用过"。
+//
+// stage 会追加进逗号分隔的集合里，重复调用幂等。
+func (r *Repository) MarkAISessionAssetsUsed(
+	ctx context.Context,
+	sessionID string,
+	assetIDs []string,
+	stage string,
+	note string,
+) error {
+	stage = strings.TrimSpace(stage)
+
+	if stage == "" || len(assetIDs) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf(
+			"begin mark asset usage: %w",
+			err,
+		)
+	}
+	defer tx.Rollback()
+
+	for _, assetID := range assetIDs {
+		if strings.TrimSpace(assetID) == "" {
+			continue
+		}
+
+		var existing sql.NullString
+
+		err := tx.QueryRowContext(
+			ctx,
+			`
+			SELECT used_in_stage
+			FROM ai_session_assets
+			WHERE session_id = ? AND asset_id = ?
+			`,
+			sessionID,
+			assetID,
+		).Scan(&existing)
+
+		if errors.Is(err, sql.ErrNoRows) {
+			// 素材没绑在这个会话上，跳过而不是报错：合成用的素材可能来自
+			// 直接调用海报接口，根本没有会话。
+			continue
+		}
+
+		if err != nil {
+			return fmt.Errorf(
+				"read asset usage stages: %w",
+				err,
+			)
+		}
+
+		if _, err := tx.ExecContext(
+			ctx,
+			`
+			UPDATE ai_session_assets
+			SET
+				used_in_stage = ?,
+				actually_used = 1,
+				usage_note = ?
+			WHERE session_id = ? AND asset_id = ?
+			`,
+			mergeUsageStages(existing.String, stage),
+			strings.TrimSpace(note),
+			sessionID,
+			assetID,
+		); err != nil {
+			return fmt.Errorf(
+				"mark asset usage: %w",
+				err,
+			)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf(
+			"commit asset usage: %w",
+			err,
+		)
+	}
+
+	return nil
+}
+
+// RecordComposedAssetUsage 由合成器的真实绘制结果驱动，按 poster_id 找到会话再
+// 落证据。找不到会话就静默返回 —— 直接走海报接口的调用方没有会话。
+func (r *Repository) RecordComposedAssetUsage(
+	ctx context.Context,
+	posterID string,
+	assetIDs []string,
+) error {
+	if len(assetIDs) == 0 {
+		return nil
+	}
+
+	var sessionID string
+
+	err := r.db.QueryRowContext(
+		ctx,
+		`
+		SELECT id
+		FROM ai_sessions
+		WHERE poster_id = ?
+		ORDER BY updated_at DESC
+		LIMIT 1
+		`,
+		posterID,
+	).Scan(&sessionID)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+
+	if err != nil {
+		return fmt.Errorf(
+			"find session for poster: %w",
+			err,
+		)
+	}
+
+	return r.MarkAISessionAssetsUsed(
+		ctx,
+		sessionID,
+		assetIDs,
+		domain.AISessionAssetStageLogoOverlay,
+		"合成时画入最终海报",
+	)
+}
+
+// mergeUsageStages 把新阶段并入已有的逗号分隔集合，保持顺序且不重复。
+func mergeUsageStages(
+	existing string,
+	stage string,
+) string {
+	stages := make([]string, 0, 4)
+	seen := map[string]bool{}
+
+	for _, value := range strings.Split(existing, ",") {
+		value = strings.TrimSpace(value)
+
+		if value == "" || seen[value] {
+			continue
+		}
+
+		seen[value] = true
+		stages = append(stages, value)
+	}
+
+	if !seen[stage] {
+		stages = append(stages, stage)
+	}
+
+	return strings.Join(stages, ",")
 }

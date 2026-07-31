@@ -67,10 +67,10 @@ func (s *Server) handleAISessions(
 		payload,
 	)
 	if err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
@@ -343,10 +343,10 @@ func (s *Server) handleGetAISession(
 	}
 
 	if err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
@@ -503,10 +503,10 @@ func (s *Server) handleBindAISessionAssets(
 		)
 
 	case err != nil:
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 
 	default:
@@ -601,10 +601,10 @@ func (s *Server) handleCancelAISession(
 	}
 
 	if err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}

@@ -253,9 +253,14 @@ func (s *PosterService) Status(
 
 func (s *PosterService) ListJobs(
 	ctx context.Context,
-	limit int,
+	page domain.Page,
 ) (domain.JobListResponse, error) {
-	jobs, err := s.repository.ListJobs(ctx, limit)
+	jobs, err := s.repository.ListJobs(ctx, page)
+	if err != nil {
+		return domain.JobListResponse{}, err
+	}
+
+	total, err := s.repository.CountJobs(ctx)
 	if err != nil {
 		return domain.JobListResponse{}, err
 	}
@@ -273,7 +278,11 @@ func (s *PosterService) ListJobs(
 
 	return domain.JobListResponse{
 		Items: items,
-		Count: len(items),
+		ListMeta: domain.NewListMeta(
+			page,
+			len(items),
+			total,
+		),
 	}, nil
 }
 
@@ -537,4 +546,29 @@ func encodeMessages(messages []any) string {
 	}
 
 	return string(raw)
+}
+
+// NegativePromptState 报告负向提示词是否真的会影响出图，以及生效所依赖的
+// 采样器 cfg 和绑定节点。
+//
+// 负向词一直被算出来、存进库、在 API 里返回，但工作流没有负向文本节点、
+// cfg 又是 1，提交给 ComfyUI 的图完全没受影响 —— 一个静默失效。
+func (s *PosterService) NegativePromptState() (
+	bool,
+	float64,
+	string,
+) {
+	if s.template == nil {
+		return false, 0, ""
+	}
+
+	node := ""
+
+	if binding := s.template.Bindings().NegativePrompt; binding != nil {
+		node = binding.NodeID
+	}
+
+	return s.template.NegativePromptEffective(),
+		s.template.EffectiveCFG(),
+		node
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -118,11 +119,31 @@ func main() {
 		os.Getenv("PROMPT_NODE_ID"),
 		os.Getenv("NEGATIVE_PROMPT_NODE_ID"),
 		os.Getenv("SEED_NODE_ID"),
+		envFloat("COMFY_CFG", 0),
 	)
 	if err != nil {
 		log.Fatalf(
 			"load workflow template: %v",
 			err,
+		)
+	}
+
+	// 负向提示词一直被算出来、存进库、在 API 里返回，但工作流没有负向文本节点
+	// 且 cfg == 1，提交给 ComfyUI 的图其实完全没受影响。静默失效比报错更难查，
+	// 所以启动时把实际状态打出来。
+	if !template.NegativePromptEffective() {
+		log.Printf(
+			"warning: negative prompts have no effect "+
+				"(negative binding=%v, cfg=%.2f); "+
+				"need a negative text node and cfg > 1",
+			template.Bindings().NegativePrompt != nil,
+			template.EffectiveCFG(),
+		)
+	} else {
+		log.Printf(
+			"negative prompt active: node=%s cfg=%.2f",
+			template.Bindings().NegativePrompt.NodeID,
+			template.EffectiveCFG(),
 		)
 	}
 
@@ -342,6 +363,33 @@ func env(
 	}
 
 	return value
+}
+
+func envFloat(
+	key string,
+	fallback float64,
+) float64 {
+	value := strings.TrimSpace(
+		os.Getenv(key),
+	)
+
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		log.Printf(
+			"invalid float %s=%q, using %v",
+			key,
+			value,
+			fallback,
+		)
+
+		return fallback
+	}
+
+	return parsed
 }
 
 func envDuration(

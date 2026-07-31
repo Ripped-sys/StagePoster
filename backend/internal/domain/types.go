@@ -41,5 +41,6 @@ type JobResponse struct {
 
 type JobListResponse struct {
 	Items []JobResponse `json:"items"`
-	Count int           `json:"count"`
+
+	ListMeta
 }

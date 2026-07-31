@@ -80,9 +80,14 @@ func (s *AssetService) Get(
 
 func (s *AssetService) List(
 	ctx context.Context,
-	limit int,
+	page domain.Page,
 ) (domain.AssetListResponse, error) {
-	assets, err := s.repository.ListAssets(ctx, limit)
+	assets, err := s.repository.ListAssets(ctx, page)
+	if err != nil {
+		return domain.AssetListResponse{}, err
+	}
+
+	total, err := s.repository.CountAssets(ctx)
 	if err != nil {
 		return domain.AssetListResponse{}, err
 	}
@@ -99,7 +104,11 @@ func (s *AssetService) List(
 
 	return domain.AssetListResponse{
 		Items: items,
-		Count: len(items),
+		ListMeta: domain.NewListMeta(
+			page,
+			len(items),
+			total,
+		),
 	}, nil
 }
 
@@ -129,23 +138,24 @@ func assetResponse(
 	asset domain.Asset,
 ) domain.AssetResponse {
 	return domain.AssetResponse{
-		ID:           asset.ID,
-		Kind:         asset.Kind,
-		OriginalName: asset.OriginalName,
-		Filename:     asset.Filename,
-		MimeType:     asset.MimeType,
-		SizeBytes:    asset.SizeBytes,
-		SHA256:       asset.SHA256,
-		Width:        asset.Width,
-		Height:       asset.Height,
-		ContentURL:   "/api/assets/" + asset.ID + "/content",
+		ID:             asset.ID,
+		Kind:           asset.Kind,
+		OriginalName:   asset.OriginalName,
+		Filename:       asset.Filename,
+		MimeType:       asset.MimeType,
+		SizeBytes:      asset.SizeBytes,
+		SHA256:         asset.SHA256,
+		Width:          asset.Width,
+		Height:         asset.Height,
+		ContentURL:     "/api/assets/" + asset.ID + "/content",
 		ProcessStatus:  asset.ProcessStatus,
 		ProcessError:   asset.ProcessError,
 		ProcessedAt:    asset.ProcessedAt,
 		MaskPath:       asset.MaskPath,
+		Cutout:         asset.Cutout,
 		AnalysisJSON:   asset.AnalysisJSON,
 		DominantColors: asset.DominantColors,
 		ProcessVersion: asset.ProcessVersion,
-		CreatedAt:    asset.CreatedAt,
+		CreatedAt:      asset.CreatedAt,
 	}
 }

@@ -18,11 +18,17 @@ type Bindings struct {
 	Prompt         *Binding `json:"prompt"`
 	NegativePrompt *Binding `json:"negativePrompt,omitempty"`
 	Seed           *Binding `json:"seed,omitempty"`
+	CFG            *Binding `json:"cfg,omitempty"`
 }
 
 type Template struct {
 	base     map[string]any
 	bindings Bindings
+
+	// cfg 为 0 表示沿用工作流 JSON 里的值。非 0 时每次 Build 覆盖采样器的
+	// cfg —— 负向提示词只有在 cfg > 1 时才进入采样，cfg == 1 时引导项被约掉，
+	// 负向分支对结果没有任何影响。
+	cfg float64
 }
 
 func LoadTemplate(
@@ -30,6 +36,7 @@ func LoadTemplate(
 	promptNodeID string,
 	negativePromptNodeID string,
 	seedNodeID string,
+	cfg float64,
 ) (*Template, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -71,14 +78,51 @@ func LoadTemplate(
 		return nil, err
 	}
 
+	cfgBinding := findCFGBinding(workflow)
+
 	return &Template{
 		base: workflow,
 		bindings: Bindings{
 			Prompt:         prompt,
 			NegativePrompt: negative,
 			Seed:           seed,
+			CFG:            cfgBinding,
 		},
+		cfg: cfg,
 	}, nil
+}
+
+// EffectiveCFG 返回实际会提交给 ComfyUI 的 cfg，供启动时自检和 /health 用。
+// 返回 0 表示读不出来（工作流里没有采样器 cfg 输入）。
+func (t *Template) EffectiveCFG() float64 {
+	if t.cfg > 0 {
+		return t.cfg
+	}
+
+	if t.bindings.CFG == nil {
+		return 0
+	}
+
+	node, ok := t.base[t.bindings.CFG.NodeID].(map[string]any)
+	if !ok {
+		return 0
+	}
+
+	inputs, ok := node["inputs"].(map[string]any)
+	if !ok {
+		return 0
+	}
+
+	value, _ := inputs[t.bindings.CFG.InputKey].(float64)
+	return value
+}
+
+// NegativePromptEffective 说明负向提示词是否真的会影响出图。两个条件都得满足：
+// 工作流里有可绑定的负向文本节点，且 cfg > 1。之前这里两条都不满足，负向词被
+// 算出来、存进库、在 API 里返回，但提交给 ComfyUI 的图完全没变。
+func (t *Template) NegativePromptEffective() bool {
+	return t.bindings.NegativePrompt != nil &&
+		t.EffectiveCFG() > 1
 }
 
 func (t *Template) Bindings() Bindings {
@@ -123,7 +167,56 @@ func (t *Template) Build(
 		}
 	}
 
+	if t.cfg > 0 && t.bindings.CFG != nil {
+		if err := applyBinding(
+			workflow,
+			t.bindings.CFG,
+			t.cfg,
+		); err != nil {
+			return nil, err
+		}
+	}
+
 	return workflow, nil
+}
+
+// findCFGBinding 找采样器上的 cfg 输入。没有显式的环境变量 —— cfg 和 seed 总在
+// 同一个采样器节点上，按 class_type 找就够了。
+func findCFGBinding(workflow map[string]any) *Binding {
+	var best *Binding
+	bestScore := -1
+
+	for _, nodeID := range sortedNodeIDs(workflow) {
+		node, ok := workflow[nodeID].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		inputs, _ := node["inputs"].(map[string]any)
+
+		if _, exists := inputs["cfg"]; !exists {
+			continue
+		}
+
+		score := 10
+
+		if strings.Contains(
+			strings.ToLower(nodeDescription(node)),
+			"sampler",
+		) {
+			score += 100
+		}
+
+		if score > bestScore {
+			bestScore = score
+			best = &Binding{
+				NodeID:   nodeID,
+				InputKey: "cfg",
+			}
+		}
+	}
+
+	return best
 }
 
 func cloneWorkflow(source map[string]any) (map[string]any, error) {
