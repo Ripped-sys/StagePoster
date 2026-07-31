@@ -171,8 +171,11 @@ Local:
 ```text
 http://127.0.0.1:8080
 Development public URL:
-https://cst-holmes-climate-charge.trycloudflare.com
+https://<当前隧道子域>.trycloudflare.com
 The public URL is temporary and must be replaced when the Quick Tunnel restarts.
+It is deliberately not committed: POSTER_API_TOKEN is currently empty, so
+publishing the address would expose an unauthenticated backend. Read the current
+one from backend/run/public-api-url.txt (gitignored) or scripts/status.sh.
 Content Type
 JSON endpoints use:
 Content-Type: application/json

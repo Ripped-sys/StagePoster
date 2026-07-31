@@ -1,11 +1,26 @@
 # Frontend Integration Guide
 
+> **过期文档 —— 请以 [`frontend-api-handoff.md`](./frontend-api-handoff.md) 为准。**
+>
+> 这份文件写于 2026-07-30 之前，早于分页、`cutout`、使用证据、参考图条件化、
+> 能力矩阵和统一的错误语义。里面的字段形状和状态码有一部分已经不对了。
+>
+> 本文件保留的唯一价值是那段 TypeScript 客户端骨架。**接口契约不要读这里。**
+>
+> 另外注意两处曾经写错的地方：
+> - 基址**不写进仓库**。这里原先硬编码了一个 Quick Tunnel 地址，那个子域早就失效了；
+>   Quick Tunnel 每次重启都会换地址。取当前地址的方式见 handoff 文档开头。
+> - 环境变量名以前端实际使用的构建工具为准（Vite 项目是 `VITE_API_BASE_URL`）。
+
 ## Development Base URL
 
 ```env
-NEXT_PUBLIC_API_BASE_URL=https://cst-holmes-climate-charge.trycloudflare.com
-This is a temporary Cloudflare Quick Tunnel URL.
-Do not commit it as a production constant.
+# 不要把隧道地址提交进仓库：当前部署 POSTER_API_TOKEN 为空（无鉴权），
+# 提交地址等于公开一个谁都能打的后端。地址由后端负责人单独转发。
+VITE_API_BASE_URL=<当前隧道地址>
+```
+
+Quick Tunnel 地址是临时的，进程重启就变，不要当成生产常量。
 API Client
 Example TypeScript client:
 const API_BASE_URL =
