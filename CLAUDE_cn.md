@@ -330,7 +330,10 @@ sudo -E bash scripts/install-all.sh
 - [ ] 如有新环境变量，在 `.env.example` 和 `main.go` 的 `env()` 调用中添加
 - [ ] 如有新的 ComfyUI 节点绑定，更新 `scripts/` 中的节点 ID 注释
 - [ ] 冒烟测试通过 `./scripts/smoke-test.sh`
-- [ ] 全量接口回归通过 `python3 scripts/e2e-test.py all`（30 条路由 / 127 条断言）
+- [ ] 全量接口回归通过 `.venv-vllm/bin/python scripts/e2e-test.py all`
+      （30 条路由 / 127 条断言）。**必须用这个解释器，不能用裸 `python3`** ——
+      脚本要用 Pillow 合成测试图，而只有 `.venv-vllm` 里装了。系统 `python3`
+      会在跑第一条断言之前就 `ModuleNotFoundError: No module named 'PIL'`。
 
 ---
 

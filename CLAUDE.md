@@ -298,7 +298,11 @@ After modifying code:
 - [ ] New env vars → add to `.env.example` and `main.go` `env()` calls
 - [ ] New ComfyUI node bindings → update node ID comments in `scripts/`
 - [ ] Smoke test passes: `./scripts/smoke-test.sh`
-- [ ] Full route regression: `python3 scripts/e2e-test.py all` (30 routes, 127 assertions)
+- [ ] Full route regression: `.venv-vllm/bin/python scripts/e2e-test.py all`
+      (30 routes, 127 assertions). **Use that interpreter, not bare `python3`** —
+      the script needs Pillow to synthesize test images, and only `.venv-vllm`
+      has it. System `python3` fails with `ModuleNotFoundError: No module named
+      'PIL'` before running a single assertion.
 
 ---
 
