@@ -4,6 +4,21 @@ export function posterLanguage(project: PosterProject): PosterLanguage {
   return project.posterLanguage ?? 'en';
 }
 
+export function formatPosterLocation(city?: string, venue?: string): string {
+  const cleanCity = city?.trim() ?? '';
+  const cleanVenue = venue?.trim() ?? '';
+  if (!cleanCity) return cleanVenue;
+  if (!cleanVenue) return cleanCity;
+  const normalizedCity = cleanCity.toLocaleLowerCase();
+  const normalizedVenue = cleanVenue.toLocaleLowerCase().replace(/^[·,\s]+/, '');
+  if (normalizedVenue === normalizedCity
+    || normalizedVenue.startsWith(`${normalizedCity} ·`)
+    || normalizedVenue.startsWith(`${normalizedCity} `)) {
+    return cleanVenue;
+  }
+  return `${cleanCity} · ${cleanVenue}`;
+}
+
 export function localizedPosterCopy(project: PosterProject) {
   const language = posterLanguage(project);
   const english = language === 'en';

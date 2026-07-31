@@ -18,7 +18,7 @@ import PosterLanguageToggle from "../components/PosterLanguageToggle";
 import { posterApi } from "../services/posterApi";
 import { useStore } from "../store";
 import type { Participant, PosterProject } from "../types";
-import { localizedPosterCopy } from "../utils/posterLanguage";
+import { formatPosterLocation, localizedPosterCopy } from "../utils/posterLanguage";
 
 async function renderRemotePublishPng(project: PosterProject, imageUrl: string) {
   const copy = localizedPosterCopy(project);
@@ -60,7 +60,7 @@ async function renderRemotePublishPng(project: PosterProject, imageUrl: string) 
   context.fillStyle = "#ffffff";
   context.font = "800 34px Arial, Microsoft YaHei";
   context.fillText(copy.bands.map((band) => band.displayName).join("  ·  ").slice(0, 34) || copy.subject, pad, 1270);
-  const columns = [[copy.labels.date, project.dateTime], [copy.labels.venue, [copy.city, copy.venue].filter(Boolean).join(" · ")], [copy.labels.ticket, project.price || copy.ticketInfo]];
+  const columns = [[copy.labels.date, project.dateTime], [copy.labels.venue, formatPosterLocation(copy.city, copy.venue)], [copy.labels.ticket, project.price || copy.ticketInfo]];
   const columnWidth = (canvas.width - pad * 2) / columns.length;
   columns.forEach(([label, value], index) => {
     const x = pad + columnWidth * index;
@@ -242,7 +242,7 @@ export default function Result() {
                   <small>POSTER VISUAL LAB · AMD ROCm</small>
                   <h2>{posterCopy.title}</h2><p>{posterCopy.theme}</p>
                   <div className="session-publish-bands">{posterCopy.bands.map((band) => <span key={band.id}>{band.logo?.dataUrl ? <img src={band.logo.dataUrl} alt={`${band.displayName} Logo`}/> : <b>{band.displayName}</b>}</span>)}</div>
-                  <dl><div><dt>{posterCopy.labels.date}</dt><dd>{project.dateTime}</dd></div><div><dt>{posterCopy.labels.venue}</dt><dd>{[posterCopy.city, posterCopy.venue].filter(Boolean).join(' · ')}</dd></div>{project.price && <div><dt>{posterCopy.labels.ticket}</dt><dd>{project.price}</dd></div>}</dl>
+                  <dl><div><dt>{posterCopy.labels.date}</dt><dd>{project.dateTime}</dd></div><div><dt>{posterCopy.labels.venue}</dt><dd>{formatPosterLocation(posterCopy.city, posterCopy.venue)}</dd></div>{project.price && <div><dt>{posterCopy.labels.ticket}</dt><dd>{project.price}</dd></div>}</dl>
                   {project.assets.qr?.dataUrl && <img className="session-publish-qr" src={project.assets.qr.dataUrl} alt="购票二维码"/>}
                 </div>
               </div>

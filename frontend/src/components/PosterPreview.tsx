@@ -1,7 +1,7 @@
 import {MapPin, Radio, Tickets} from 'lucide-react';
 import type {PosterProject} from '../types';
 import {styles} from '../data/mock';
-import {localizedPosterCopy} from '../utils/posterLanguage';
+import {formatPosterLocation, localizedPosterCopy} from '../utils/posterLanguage';
 
 export default function PosterPreview({project, nodeRef}: {
   project: PosterProject;
@@ -28,7 +28,7 @@ export default function PosterPreview({project, nodeRef}: {
     </div>)}</div>
     <div className="poster-info">
       <span>{copy.labels.date}: {project.dateTime || copy.labels.pending}</span>
-      <span><MapPin size={14}/>{copy.labels.venue}: {[copy.city, copy.venue].filter(Boolean).join(' · ') || copy.labels.pending}</span>
+      <span><MapPin size={14}/>{copy.labels.venue}: {formatPosterLocation(copy.city, copy.venue) || copy.labels.pending}</span>
       <span><Tickets size={14}/>{copy.labels.ticket}: {project.price || copy.ticketInfo || copy.labels.pending}</span>
     </div>
     <div className="poster-foot"><b>REAL DATA / REAL LOGO</b><span>1024 × 1536</span>{project.assets.qr?.dataUrl && <img src={project.assets.qr.dataUrl} alt="购票二维码"/>}</div>

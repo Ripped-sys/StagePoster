@@ -36,6 +36,8 @@ export interface AISessionBrief {
     musicGenre?: string;
     mood?: string[];
     preferredColors?: string[];
+    referenceAssetId?: string;
+    controlStrength?: number;
   };
 }
 
@@ -67,6 +69,14 @@ export interface AICandidate {
   selected: boolean;
   imageUrl?: string;
   error?: string;
+  spec?: {
+    motif?: string;
+    composition?: string;
+    camera?: string;
+    materials?: string[];
+    palette?: string[];
+    lighting?: string;
+  };
 }
 
 export interface AISession {
@@ -101,7 +111,14 @@ export interface AISession {
     resultUrl?: string;
     thumbnailUrl?: string;
     candidates: AICandidate[];
-    progress: {completed: number; total: number};
+    progress: {
+      completed: number;
+      total: number;
+      stage?: string;
+      percent?: number;
+      elapsedSeconds?: number;
+      etaSeconds?: number;
+    };
     error?: string;
   };
 }
@@ -121,6 +138,10 @@ export interface RemoteAsset {
   sizeBytes?: number;
   sha256?: string;
   createdAt?: string;
+  cutout?: {
+    status: 'pending' | 'ready' | 'opaque' | 'unsupported' | 'failed';
+    hasAlpha?: boolean;
+  };
 }
 
 export interface AISessionAsset {
@@ -188,6 +209,9 @@ export interface BackendCapability {
   available: boolean;
   reason?: string;
   influences?: string[];
+  controlMode?: string;
+  patch?: string;
+  strength?: {default?: number; min?: number; max?: number};
 }
 
 export interface BackendDependencies {
@@ -282,14 +306,22 @@ export const aiSessionApi = {
       : response.session;
   },
   async uploadAsset(blob: Blob, filename: string, kind: RemoteAsset['kind']) {
-    const form = new FormData();
-    form.append('file', blob, filename);
-    form.append('kind', kind);
-    const response = await fetchWithRetry(`${AI_API_BASE_URL}/api/assets`, {method: 'POST', body: form});
-    const body = await response.json().catch(() => null) as (RemoteAsset & {error?: string}) | null;
-    if (!response.ok) throw new Error(body?.error || `素材上传失败（HTTP ${response.status}）`);
-    return body as RemoteAsset;
+    let lastError = '';
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const form = new FormData();
+      form.append('file', blob, filename);
+      form.append('kind', kind);
+      const response = await fetchWithRetry(`${AI_API_BASE_URL}/api/assets`, {method: 'POST', body: form});
+      const body = await response.json().catch(() => null) as (RemoteAsset & {error?: string}) | null;
+      if (response.ok) return body as RemoteAsset;
+      lastError = body?.error || `素材上传失败（HTTP ${response.status}）`;
+      const transientUploadTimeout = /timeout|temporar|connection/i.test(lastError);
+      if (!transientUploadTimeout || attempt === 1) break;
+      await new Promise((resolve) => window.setTimeout(resolve, 1200));
+    }
+    throw new Error(lastError);
   },
+  getAsset: (assetId: string) => request<RemoteAsset>(`/api/assets/${encodeURIComponent(assetId)}`),
   bindAssets: (sessionId: string, assets: {assetId: string; purpose: string}[]) => request<AISession>(
     `/api/ai/sessions/${sessionId}/assets`,
     {method: 'POST', body: JSON.stringify({assets})},

@@ -12,7 +12,7 @@ import {
 } from '../services/aiSessionApi';
 import AssetUpload from './AssetUpload';
 import PosterLanguageToggle from './PosterLanguageToggle';
-import {localizedPosterCopy} from '../utils/posterLanguage';
+import {formatPosterLocation, localizedPosterCopy} from '../utils/posterLanguage';
 
 export type ProjectDraft = Partial<Omit<PosterProject, 'bands'>> & {bands?: Participant[]};
 
@@ -86,7 +86,7 @@ function mergeLocalBrief(session: AISession, project: PosterProject): AISession 
       artist,
       date: event.date || project.dateTime.split(/\s+/)[0] || '',
       time: event.time || project.dateTime.split(/\s+/)[1] || '',
-      venue: event.venue || [project.city, project.venue].filter(Boolean).join(' · '),
+      venue: event.venue || formatPosterLocation(project.city, project.venue),
     },
     visual: {
       ...visual,
@@ -111,7 +111,7 @@ function mergeLocalBrief(session: AISession, project: PosterProject): AISession 
   return {...session, brief: mergedBrief, missingFields: missingFields.length ? missingFields : null};
 }
 
-function projectToSessionBrief(project: PosterProject): AISessionBrief {
+function projectToSessionBrief(project: PosterProject, referenceAssetId?: string, controlStrength?: number): AISessionBrief {
   const [date = '', time = ''] = project.dateTime.trim().split(/\s+/, 2);
   return {
     event: {
@@ -119,7 +119,7 @@ function projectToSessionBrief(project: PosterProject): AISessionBrief {
       artist: project.bands.map((band) => band.name).filter(Boolean).join(' & ') || project.subject,
       date,
       time,
-      venue: [project.city, project.venue].filter(Boolean).join(' · '),
+      venue: formatPosterLocation(project.city, project.venue),
       presalePrice: project.price,
     },
     branding: {
@@ -130,6 +130,7 @@ function projectToSessionBrief(project: PosterProject): AISessionBrief {
       theme: project.theme,
       musicGenre: project.bands.map((band) => band.genre).filter(Boolean).join(' / '),
       mood: project.theme ? [project.theme] : undefined,
+      ...(referenceAssetId ? {referenceAssetId, controlStrength} : {}),
     },
   };
 }
@@ -186,6 +187,8 @@ export default function ProjectAssistant({project, onApply}: {
   const [pendingMessage, setPendingMessage] = useState('');
   const [backendHealth, setBackendHealth] = useState<BackendHealth | null>(null);
   const [backendDependencies, setBackendDependencies] = useState<BackendDependencies | null>(null);
+  const [referenceStrength, setReferenceStrength] = useState(0.35);
+  const [assetWarnings, setAssetWarnings] = useState<string[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const publishRef = useRef<HTMLDivElement>(null);
@@ -246,6 +249,55 @@ export default function ProjectAssistant({project, onApply}: {
     } finally { setBusy(false); }
   };
 
+  const prepareRemoteAssets = async () => {
+    const bindings = projectAssetBindings(project);
+    const cacheKey = `poster-remote-assets:${project.id}`;
+    const cache = JSON.parse(localStorage.getItem(cacheKey) ?? '{}') as Record<string, string>;
+    const remoteBindings: {
+      assetId: string;
+      purpose: string;
+      localAssetId: string;
+      kind: AssetBinding['kind'];
+    }[] = [];
+    const failures: string[] = [];
+    const warnings: string[] = [];
+
+    for (const binding of bindings) {
+      setUploadProgress(`正在处理 ${binding.asset.name}…`);
+      try {
+        let assetId = cache[binding.asset.id];
+        if (!assetId) {
+          const uploaded = await aiSessionApi.uploadAsset(
+            await dataUrlBlob(binding.asset), binding.asset.name.replace(/\.[^.]+$/, '.png'), binding.kind,
+          );
+          assetId = uploaded.assetId;
+          cache[binding.asset.id] = assetId;
+        }
+        remoteBindings.push({
+          assetId,
+          purpose: binding.purpose,
+          localAssetId: binding.asset.id,
+          kind: binding.kind,
+        });
+
+        if (binding.kind === 'logo') {
+          const inspected = await aiSessionApi.getAsset(assetId);
+          if (inspected.cutout?.status === 'opaque' || inspected.cutout?.hasAlpha === false) {
+            warnings.push(`${binding.asset.name} 没有透明通道，将以矩形底图叠加；建议换成透明 PNG。`);
+          } else if (inspected.cutout?.status === 'pending') {
+            warnings.push(`${binding.asset.name} 的透明度仍在检测中。`);
+          }
+        }
+      } catch (reason) {
+        failures.push(`${binding.asset.name}：${reason instanceof Error ? reason.message : '上传失败'}`);
+      }
+    }
+
+    localStorage.setItem(cacheKey, JSON.stringify(cache));
+    setAssetWarnings(warnings);
+    return {remoteBindings, failures};
+  };
+
   const send = async (preset?: string) => {
     const content = (preset ?? input).trim();
     if (!content || busy) return;
@@ -253,7 +305,30 @@ export default function ProjectAssistant({project, onApply}: {
     try {
       let current = session;
       if (!current) {
-        current = await aiSessionApi.create(projectToSessionBrief(project));
+        const bindings = projectAssetBindings(project);
+        let remoteBindings: Awaited<ReturnType<typeof prepareRemoteAssets>>['remoteBindings'] = [];
+        let failures: string[] = [];
+        if (bindings.length) {
+          setUploadProgress(`先上传 ${bindings.length} 项附件，再交给 AI…`);
+          ({remoteBindings, failures} = await prepareRemoteAssets());
+        }
+        if (failures.length) {
+          throw new Error(`附件上传失败，已阻止创建无素材 Session：${failures.join('；')}`);
+        }
+        const referenceAssetId = remoteBindings.find((binding) => (
+          binding.purpose === 'reference' && binding.localAssetId === project.assets.reference?.id
+        ))?.assetId;
+        const referenceAvailable = backendDependencies?.capabilities?.referenceImageConditioning?.available === true;
+        current = await aiSessionApi.create(
+          projectToSessionBrief(
+            project,
+            referenceAvailable ? referenceAssetId : undefined,
+            referenceAvailable && referenceAssetId ? referenceStrength : undefined,
+          ),
+          remoteBindings.map(({assetId, purpose}) => ({assetId, purpose})),
+        );
+        setBoundAssetCount(remoteBindings.length);
+        if (failures.length) setError(`部分附件未上传：${failures.join('；')}`);
         localStorage.setItem(storageKey, current.sessionId);
         setSession(current);
       }
@@ -262,7 +337,7 @@ export default function ProjectAssistant({project, onApply}: {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '发送消息失败');
       setInput(content);
-    } finally { setBusy(false); setPendingMessage(''); }
+    } finally { setBusy(false); setPendingMessage(''); setUploadProgress(''); }
   };
 
   const applyBrief = () => {
@@ -353,29 +428,12 @@ export default function ProjectAssistant({project, onApply}: {
     setBusy(true); setError('');
     setUploadProgress(`准备上传 ${assetBindings.length} 项素材…`);
     try {
-      const cacheKey = `poster-remote-assets:${project.id}`;
-      const cache = JSON.parse(localStorage.getItem(cacheKey) ?? '{}') as Record<string, string>;
-      const remoteBindings: {assetId: string; purpose: string}[] = [];
-      const failures: string[] = [];
-      for (const binding of assetBindings) {
-        setUploadProgress(`正在处理 ${binding.asset.name}…`);
-        try {
-          let assetId = cache[binding.asset.id];
-          if (!assetId) {
-            const uploaded = await aiSessionApi.uploadAsset(
-              await dataUrlBlob(binding.asset), binding.asset.name.replace(/\.[^.]+$/, '.png'), binding.kind,
-            );
-            assetId = uploaded.assetId;
-            cache[binding.asset.id] = assetId;
-          }
-          remoteBindings.push({assetId, purpose: binding.purpose});
-        } catch (reason) {
-          failures.push(`${binding.asset.name}：${reason instanceof Error ? reason.message : '上传失败'}`);
-        }
-      }
-      localStorage.setItem(cacheKey, JSON.stringify(cache));
+      const {remoteBindings, failures} = await prepareRemoteAssets();
       if (remoteBindings.length) {
-        const next = await aiSessionApi.bindAssets(session.sessionId, remoteBindings);
+        const next = await aiSessionApi.bindAssets(
+          session.sessionId,
+          remoteBindings.map(({assetId, purpose}) => ({assetId, purpose})),
+        );
         setSession(next);
         setBoundAssetCount(remoteBindings.length);
       }
@@ -462,7 +520,15 @@ export default function ProjectAssistant({project, onApply}: {
     </section>}
 
     {session?.poster && <section className="assistant-generation">
-      <header><b>候选视觉</b><span>{session.poster.progress.completed} / {session.poster.progress.total}</span></header>
+      <header><b>候选视觉</b><span>{session.poster.progress.percent != null ? `${session.poster.progress.percent}%` : `${session.poster.progress.completed} / ${session.poster.progress.total}`}</span></header>
+      <div className="assistant-pipeline-progress" aria-label="生成总进度">
+        <i style={{width: `${session.poster.progress.percent ?? (session.poster.progress.completed / Math.max(1, session.poster.progress.total) * 65)}%`}}/>
+      </div>
+      <div className="assistant-pipeline-meta">
+        <span>{session.poster.progress.stage ?? session.status}</span>
+        <span>{session.poster.progress.elapsedSeconds != null ? `已用 ${session.poster.progress.elapsedSeconds}s` : ''}</span>
+        <span>{session.poster.progress.etaSeconds != null ? `预计剩余 ${session.poster.progress.etaSeconds}s` : ''}</span>
+      </div>
       {shouldPoll && <div className="generation-live"><LoaderCircle/> AMD GPU 正在生成候选图，页面会自动刷新</div>}
       <div className="candidate-grid">{candidates.map((candidate) => {
         const imageUrl = absoluteAIImageUrl(candidate.imageUrl);
@@ -471,6 +537,11 @@ export default function ProjectAssistant({project, onApply}: {
             ? <button className="candidate-image-button" type="button" onClick={() => setLightbox({src: imageUrl, alt: candidate.variantName})} aria-label={`放大查看 ${candidate.variantName}`}><img src={imageUrl} alt={candidate.variantName} onError={() => setImageErrors((current) => ({...current, [candidate.candidateId]: true}))}/><Maximize2/></button>
             : <div className="candidate-placeholder"><LoaderCircle/><span>{candidate.status}</span></div>}
           <b>{candidate.variantName}</b><small>AI 主视觉 · Attempt {candidate.attempt} · {candidate.status}</small>
+          {candidate.spec && <details className="candidate-spec"><summary>查看视觉参数</summary>
+            {candidate.spec.motif && <p>{candidate.spec.motif}</p>}
+            {candidate.spec.camera && <small>{candidate.spec.camera}</small>}
+            {!!candidate.spec.palette?.length && <div>{candidate.spec.palette.map((color) => <i key={color} style={{background: color}} title={color}/>)}</div>}
+          </details>}
           {actions.includes('select_candidate') && candidate.status === 'ready' && <button disabled={busy} onClick={() => run(() => aiSessionApi.selectCandidate(session.sessionId, candidate.candidateId))}>选择这张</button>}
           {candidate.status === 'failed' && session.poster && <button disabled={busy} onClick={() => run(() => aiSessionApi.retryCandidate(session.sessionId, session.poster!.posterId, candidate.candidateId))}>仅重试这张</button>}
         </article>;
@@ -492,7 +563,7 @@ export default function ProjectAssistant({project, onApply}: {
           <h2>{posterCopy.title || session?.brief.event.title}</h2>
           <p>{posterCopy.theme || session?.brief.visual.theme}</p>
           <div className="session-publish-bands">{posterCopy.bands.map((band) => <span key={band.id}>{band.logo?.dataUrl ? <img src={band.logo.dataUrl} alt={`${band.displayName} Logo`}/> : <b>{band.displayName}</b>}</span>)}</div>
-          <dl><div><dt>{posterCopy.labels.date}</dt><dd>{project.dateTime || `${session?.brief.event.date ?? ''} ${session?.brief.event.time ?? ''}`}</dd></div><div><dt>{posterCopy.labels.venue}</dt><dd>{[posterCopy.city, posterCopy.venue].filter(Boolean).join(' · ') || session?.brief.event.venue}</dd></div>{project.price && <div><dt>{posterCopy.labels.ticket}</dt><dd>{project.price}</dd></div>}</dl>
+          <dl><div><dt>{posterCopy.labels.date}</dt><dd>{project.dateTime || `${session?.brief.event.date ?? ''} ${session?.brief.event.time ?? ''}`}</dd></div><div><dt>{posterCopy.labels.venue}</dt><dd>{formatPosterLocation(posterCopy.city, posterCopy.venue) || session?.brief.event.venue}</dd></div>{project.price && <div><dt>{posterCopy.labels.ticket}</dt><dd>{project.price}</dd></div>}</dl>
           {project.assets.qr?.dataUrl && <img className="session-publish-qr" src={project.assets.qr.dataUrl} alt="购票二维码"/>}
         </div>
       </div>}
@@ -505,13 +576,27 @@ export default function ProjectAssistant({project, onApply}: {
     {canMessage && <>
       <details className="assistant-upload-studio assistant-attachment-tray">
         <summary><span>＋ 添加附件（可选）</span><small>{assetBindings.length ? `${assetBindings.length} 项素材` : '人物 / Logo / 风格参考'}</small></summary>
-        <p>所有附件均非必填。人物和 Logo 保留原始内容，参考图只用于提取视觉语言。</p>
+        <p>所有附件均非必填。透明 Logo 会作为原始图层叠加；参考图可通过 ControlNet 影响主视觉构图。</p>
         <div className="assistant-upload-grid">
           <AssetUpload label="人物 / 乐队照片（可选）" kind="person" value={project.bands[0]?.groupPhoto} onChange={(asset) => setConversationAsset('person', asset)}/>
           <AssetUpload label="乐队原始 Logo（可选）" kind="logo" value={project.bands[0]?.logo} onChange={(asset) => setConversationAsset('logo', asset)}/>
           <AssetUpload label="海报风格参考（可选）" kind="reference" value={project.assets.reference} onChange={(asset) => setConversationAsset('reference', asset)}/>
         </div>
-        {!session && assetBindings.length > 0 && <small className="assistant-asset-hint">附件已保存在项目中。发送消息后即可绑定给 AI。</small>}
+        {project.assets.reference && backendDependencies?.capabilities?.referenceImageConditioning?.available && <label className="assistant-reference-strength">
+          <span>参考图影响强度 <b>{referenceStrength.toFixed(2)}</b></span>
+          <input
+            type="range"
+            min={backendDependencies.capabilities.referenceImageConditioning.strength?.min ?? 0.05}
+            max={backendDependencies.capabilities.referenceImageConditioning.strength?.max ?? 1}
+            step="0.05"
+            value={referenceStrength}
+            onChange={(event) => setReferenceStrength(Number(event.target.value))}
+          />
+          <small>0.2–0.4 借调性 · 0.55 平衡 · 0.75 接近复刻构图</small>
+        </label>}
+        {!session && assetBindings.length > 0 && <small className="assistant-asset-hint">发送第一条消息时会先上传附件，并把参考图 ID 与强度写入生成 Brief。</small>}
+        {session && project.assets.reference && !session.brief.visual.referenceAssetId && <small className="assistant-asset-hint warning">当前会话创建时没有参考图。请开始新的 AI 会话，让参考图真正进入生成 Brief。</small>}
+        {!!assetWarnings.length && <div className="assistant-asset-warnings">{assetWarnings.map((warning) => <small key={warning}>{warning}</small>)}</div>}
       </details>
       <div className="assistant-prompts">
         <button onClick={() => send('我要做一张地下金属演出海报。标题是长安双雄，艺人是内网穿透 NATP 与示例金属乐队，2026 年 8 月 8 日 20:00，在西安大雁塔附近演出。视觉是黑色、骨白、氧化红的手工复印拼贴，工业金属风，情绪原始、黑暗、仪式感、高能量。')}>地下金属演出</button>
