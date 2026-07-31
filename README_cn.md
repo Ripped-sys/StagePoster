@@ -1725,11 +1725,28 @@ sudo ./scripts/recover-after-instance-kill.sh
 
 ## 16.2 销毁实例前持久化
 
+平台维护窗口前的**轻量**备份（推荐日常用这个）：
+
+```bash
+cd /workspace/poster-engine
+
+bash scripts/backup-persistence.sh          # 快速
+bash scripts/backup-persistence.sh --hash   # 附带权重 sha256，慢
+```
+
+产物在 `/workspace/persistence/stageposter/backups/<时间戳>/`，
+`backups/latest` 指向最新一份，内含 `RESTORE.md` 逐步恢复说明。
+
+实例即将被销毁时的**完整**持久化（还会记录工具链、Python runtime、运行命令等）：
+
 ```bash
 cd /workspace/poster-engine/backend
 
-sudo ./scripts/prepare-before-instance-kill.sh
+sudo -E bash scripts/prepare-before-instance-kill.sh
 ```
+
+> **注意用 `sudo -E`**，不要用 `sudo`。脚本要读项目根目录的 `.env` 拿 `DB_PATH`，
+> 丢掉环境会退回到默认值。
 
 持久化流程记录：
 
@@ -1744,6 +1761,25 @@ sudo ./scripts/prepare-before-instance-kill.sh
 - cloudflared Binary；
 - 当前运行命令；
 - 系统版本；
+
+### 这两个脚本此前的两个 bug（已修，2026-07-31）
+
+写在这里是因为**修复前跑完会打印 `PERSISTENCE PREPARATION COMPLETE`**，
+看起来完全成功：
+
+1. **备份目录落在 `/workspace/poster-engine/persist`** —— 即项目目录内部，
+   恰好是实例重置时会被清掉的地方。现在落在
+   `/workspace/persistence/stageposter/prekill`（可用 `PERSIST_ROOT` 覆盖）。
+   `recover-after-instance-kill.sh` 里的同一处路径也一起改了，否则恢复会去错的
+   地方找。
+2. **数据库路径写死成 `backend/data/poster.db`** —— 那是早期遗留文件，不是线上库。
+   线上库由 `.env` 的 `DB_PATH` 指向持久化目录。实测写死会备份到 13 行，
+   而线上是 56 行。现在从 `.env` 读。
+
+另外加了一道预检：当权重源和备份目标在**同一个文件系统**上时，跳过那 20G 的
+`rsync` —— 同卷复制不构成任何保护（卷没了两份一起没），却会把剩余空间从 26G
+压到 6G，中途失败还会留下截断的权重文件，比没有权重更难排查。
+跳过时仍然记录 `model-sizes.txt` 供恢复时核对。需要强制复制：`FORCE_MODEL_COPY=1`。
 - Git State；
 - Symlink 审计；
 - E2E Artifacts。

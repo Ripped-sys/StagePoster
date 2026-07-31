@@ -123,3 +123,14 @@ results/
 *.jpg
 *.jpeg
 *.webp
+
+# prepare-before-instance-kill.sh 会把 Go toolchain / uv / cloudflared 复制到这里，
+# 用于实例重置后免下载恢复。它们是运行时产物，不进仓库（约 450M）。
+/toolchains/
+/tools/
+# 早期的备份目录名，现已改为 /workspace/persistence/stageposter/prekill
+/persist/
+
+# go build 的产物
+/backend/server
+/backend/poster-backend

@@ -230,19 +230,21 @@ sudo -E bash scripts/install-all.sh
 | `VLM_URL` | `http://127.0.0.1:8001` | vLLM 地址 |
 | `VLM_API_KEY` | `stageposter-vlm-local` | vLLM API Key |
 | `VLM_MODEL` | `stageposter-vlm` | vLLM 模型名 |
-| `DB_PATH` | `backend/data/poster.db` | SQLite 路径 |
-| `STORAGE_ROOT` | `backend/storage/jobs` | 任务输出目录 |
+| `DB_PATH` | `backend/data/poster.db` | SQLite 路径。**线上实际指向 `/workspace/persistence/stageposter/data/poster.db`**，见 §11 |
+| `STORAGE_ROOT` | `backend/storage/jobs` | 任务输出目录。线上同样指向持久化目录 |
 | `WORKFLOW_PATH` | `workflows/z_image_poster_v1.json` | ComfyUI 工作流 |
 | `WORKFLOW_KEY` | `poster-text` | 工作流标识 |
 | `WORKFLOW_VERSION` | `1.0.0` | 工作流版本 |
-| `POSTER_API_TOKEN` | `""` | API 认证 token |
+| `POSTER_API_TOKEN` | `""` | API 认证 token。**当前为空 = 无鉴权** |
 | `CORS_ORIGIN` | `*` | CORS 来源 |
 | `POSTER_FONT_REGULAR` | `""` | 正文字体路径（系统字体名） |
 | `POSTER_FONT_BOLD` | `""` | 粗体字体路径 |
 | `RECONCILE_INTERVAL` | `2s` | reconciler 轮询间隔 |
 | `PROMPT_NODE_ID` | `57:27` | ComfyUI prompt 节点 |
-| `NEGATIVE_PROMPT_NODE_ID` | `""` | ComfyUI negative prompt 节点 |
+| `NEGATIVE_PROMPT_NODE_ID` | `57:34` | ComfyUI negative prompt 节点 |
+| `COMFY_CFG` | `""` | 采样器 cfg 覆盖；留空沿用工作流里的值（2）。**负向提示词只在 cfg > 1 时生效** |
 | `SEED_NODE_ID` | `57:3` | ComfyUI seed 节点 |
+| `REFERENCE_CONTROL_PATCH` | `""` | `ComfyUI/models/model_patches` 下的 Z-Image ControlNet 权重文件名。启用参考图条件化；留空则参考图只影响需求理解那次 VLM 调用 |
 
 ---
 
@@ -257,6 +259,27 @@ sudo -E bash scripts/install-all.sh
 - Workflow JSON 中的节点 ID 是固定的（通过 `PROMPT_NODE_ID` / `SEED_NODE_ID` 配置）
 - 任务提交后通过 `/history/{prompt_id}` 轮询输出
 - 输出图片存储在 ComfyUI 的输出目录，通过 `storage.FileStore` 复制到 `STORAGE_ROOT`
+- **参考图条件化是注入的，不是写在模板里的。** 工作流 JSON 里没有任何参考图节点。
+  请求带参考素材时，`comfy.Template.Build` 会往*克隆出来的*图里注入
+  `LoadImage` → `Canny` → `ModelPatchLoader` → `ZImageFunControlnet`，
+  并把采样器的 `model` 输入改接到 ControlNet 上。不带参考图的请求产出的图与从前
+  **逐字节一致** —— 这正是这个特性不会回归掉所有既有调用方的原因。
+  不要把这些节点搬进模板文件。`TestBuildWithoutReferenceIsUnchanged` 钉住了这条。
+- Z-Image 的 ControlNet **不走** ComfyUI 的 `load_controlnet`，走的是 model-patch 路径
+  （`comfy_extras/nodes_model_patch.py`）。`comfy/controlnet.py` 里根本没有 lumina 分支，
+  在那里搜会得到假的否定结论。
+- 参考图必须先送到 ComfyUI：`comfy.Client.UploadImage` 走 `/upload/image`，
+  而不是往 ComfyUI 的 `input/` 目录里写文件 —— 这样容器化或远程的 ComfyUI 也能用。
+
+### vLLM
+- 启动参数必须带 `--mm-processor-cache-gb 0`。该值默认 4，跑一段时间后**所有带图请求**
+  会稳定 500，报 `AssertionError: Expected a cached item for mm_hash=...`，
+  而纯文本请求一切正常。这个症状极易被误判成后端 bug。`scripts/start-all.sh` 已带上。
+
+### 环境变量加载
+- **后端二进制自己不读 `.env`。** `scripts/start-all.sh` 里做的是
+  `set -a; source "$ENV_FILE"; set +a`。手工跑 `./poster-backend` 会静默丢掉
+  `REFERENCE_CONTROL_PATCH` 之类的配置，且不报错 —— 表现为功能"莫名不可用"。
 
 ### SQLite
 - 使用 `modernc.org/sqlite`（纯 Go 实现，无需 CGO）
@@ -275,7 +298,10 @@ sudo -E bash scripts/install-all.sh
 - 所有 POST 请求体为 JSON
 - 错误响应：`{"error": "message"}` + 对应 HTTP status
 - 成功响应：`{"data": ...}` 或直接返回资源对象
-- 分页：列表端点返回 `items []` + `total int`
+- 分页：列表端点接受 `?limit=`（1–100，默认 20）和 `?offset=`（默认 0）。
+  超范围的值返回 400，不做静默截断。信封里同时有 `items []`、`count`（本页行数）、
+  `total`（表内总行数）、`limit`、`offset`。本文件早期版本只写了 `total int` 且没有
+  `count`，而代码一直只返回 `count` —— 现在两个都在，且按实际行为描述。
 - 认证：`Authorization: Bearer <POSTER_API_TOKEN>`（可选，生产环境建议启用）
 
 ---
@@ -287,7 +313,10 @@ sudo -E bash scripts/install-all.sh
 - **上下文**：所有耗时操作接收 `context.Context`，HTTP handler 从 `r.Context()` 传递
 - **日志**：使用标准库 `log`，生产环境建议替换为结构化日志
 - **ID 生成**：使用 `domain.NewID(prefix)` 生成 `prefix_xxxxxxxx` 格式 ID
-- **JSON**：字段名使用 `json:"snake_case"`，API 响应与请求保持一致
+- **JSON**：字段名使用 `json:"camelCase"`（`posterId`、`sessionId`、`createdAt`）。
+  本文件此前写的是 `snake_case`，与代码从来不符。请求与响应形状保持一致。
+- **错误**：500 响应统一返回 `{"error":"internal server error"}`，真实原因只记服务端日志。
+  **不要把 `err.Error()` 透给客户端** —— 文件系统路径和驱动内部细节会从这里泄漏。
 - **文件路径**：绝对路径从环境变量读取，不要硬编码
 
 ---
@@ -301,3 +330,61 @@ sudo -E bash scripts/install-all.sh
 - [ ] 如有新环境变量，在 `.env.example` 和 `main.go` 的 `env()` 调用中添加
 - [ ] 如有新的 ComfyUI 节点绑定，更新 `scripts/` 中的节点 ID 注释
 - [ ] 冒烟测试通过 `./scripts/smoke-test.sh`
+- [ ] 全量接口回归通过 `python3 scripts/e2e-test.py all`（30 条路由 / 127 条断言）
+
+---
+
+## 11. 持久化与备份
+
+云主机会被重置，所以"东西在哪个目录"是个正确性问题，不是运维偏好。
+
+### 目录约定
+
+NFS 持久化根目录是 `/workspace/persistence`。本项目用
+`/workspace/persistence/stageposter/`，`.env` 里四个路径全部指向它：
+
+```
+DB_PATH             = /workspace/persistence/stageposter/data/poster.db
+STORAGE_ROOT        = /workspace/persistence/stageposter/storage/jobs
+ASSET_STORAGE_ROOT  = /workspace/persistence/stageposter/storage/assets
+POSTER_OUTPUT_ROOT  = /workspace/persistence/stageposter/storage/posters
+```
+
+**注意 `backend/data/poster.db` 是早期遗留文件，不是线上库。** 它还在盘上、还会
+被 `DB_PATH` 的默认值指到。备份或排查时认错库，会得到一份看着合理但过期的数据。
+判断线上库的唯一依据是 `.env` 里的 `DB_PATH`。
+
+### 备份
+
+```bash
+bash scripts/backup-persistence.sh          # 快速
+bash scripts/backup-persistence.sh --hash   # 附带权重 sha256，慢
+```
+
+产物落在 `/workspace/persistence/stageposter/backups/<时间戳>/`，
+`backups/latest` 是指向最新一份的符号链接。每份包含 `RESTORE.md`（逐步恢复说明）、
+数据库一致性快照、`env.backup`、权重清单、git 提交状态。
+
+三条设计上的理由，改这个脚本前先读：
+
+1. **数据库用 `VACUUM INTO`，不用 `cp`。** 后端在线时 WAL 里可能有数 MB 尚未
+   checkpoint 的数据，`cp` 出来的文件要么偏旧要么撕裂。`VACUUM INTO` 取读快照并
+   把 WAL 并进单文件，之后脚本对*快照本身*跑 `integrity_check` —— 要断言的是
+   "这份备份能用"，而不是"源库没坏"。
+2. **`.env` 必须备份。** 它被 `.gitignore` 排除，所以全机只有一份。
+3. **43G 权重不进备份，只留清单。** 盘上没那么多空余。清单是为了核对重新下载的结果，
+   见下条。
+
+### 恢复时的两个坑
+
+- **权重重新下载必须带 `HF_HUB_DISABLE_XET=1`。** huggingface.co 直连不通，走
+  hf-mirror；但只设 `HF_ENDPOINT` 不够 —— Xet 支撑的大文件会绕过镜像直连
+  `cas-server.xethub.hf.co` 然后 401。**小文件下来了、权重没下来，目录看着像是好的，
+  退出码也可能是 0。** 只能按 `model-manifest.txt` 逐个核对字节数。
+- **恢复数据库要删掉旧的 `-wal` / `-shm`。** 否则 SQLite 会拿陈旧的 WAL 去套新库。
+
+### 不在备份范围内
+
+`storage/`（候选图、成品海报、上传素材，约 410M）只有持久化目录里那一份。
+整个 `/workspace/persistence` 丢失则历史海报丢失，数据库记录会指向不存在的文件。
+这是**已知且被接受**的取舍：成品可以重新生成，原始 brief 在库里。

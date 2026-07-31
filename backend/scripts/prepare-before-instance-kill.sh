@@ -3,7 +3,14 @@ set -Eeuo pipefail
 
 ROOT="/workspace/poster-engine"
 BACKEND="$ROOT/backend"
-PERSIST="$ROOT/persist"
+
+# 必须落在 NFS 持久化根目录下，不能落在 $ROOT 里面。
+#
+# 这里原先是 "$ROOT/persist" —— 也就是 /workspace/poster-engine/persist，
+# 恰好是实例重置时会被清掉的地方。脚本会照常跑完并打印
+# "PERSISTENCE PREPARATION COMPLETE"，然后连同备份一起消失。
+PERSIST="${PERSIST_ROOT:-/workspace/persistence/stageposter}/prekill"
+
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 SNAPSHOT="$PERSIST/snapshots/$STAMP"
 
@@ -33,7 +40,18 @@ du -sh "$ROOT" 2>/dev/null || true
 echo
 echo "===== SQLITE CHECKPOINT AND BACKUP ====="
 
-DB_PATH="$BACKEND/data/poster.db"
+# DB_PATH 从 .env 读，不要硬编码。
+#
+# 这里原先写死 "$BACKEND/data/poster.db"。那个文件还在盘上，但它是早期遗留 ——
+# 线上库由 .env 的 DB_PATH 指向持久化目录。写死的结果是备份了一份陈旧数据
+# （实测 13 行 vs 线上 56 行）并且报告成功，这比备份失败更危险。
+DB_PATH=""
+if [[ -f "$ROOT/.env" ]]; then
+  DB_PATH="$(grep -E '^DB_PATH=' "$ROOT/.env" | tail -1 | cut -d= -f2- || true)"
+fi
+DB_PATH="${DB_PATH:-$BACKEND/data/poster.db}"
+
+echo "DB_PATH=$DB_PATH"
 
 if [[ -f "$DB_PATH" ]]; then
   sqlite3 "$DB_PATH" "PRAGMA wal_checkpoint(FULL);" || true
@@ -218,6 +236,36 @@ done < <(
 echo
 echo "===== BACK UP REQUIRED COMFYUI MODELS ====="
 
+# 复制权重前先看清两件事，否则这一步是纯亏。
+#
+# 1. 如果 $PERSIST 和权重源在同一个文件系统上，复制 20G 不构成任何保护 ——
+#    卷被清掉时两份一起没。真正的保护是"能重新下载"，靠的是 CHECKSUMS 段
+#    产出的清单，不是这份副本。
+# 2. 剩余空间不够时 rsync 会写到一半失败，留下一堆截断文件，
+#    而截断的权重比没有权重更难排查。
+#
+# 所以：同卷 + 空间不足 → 跳过复制，只留清单。设 FORCE_MODEL_COPY=1 可强制。
+SRC_DEV="$(stat -c%d "$ROOT/ComfyUI/models" 2>/dev/null || echo 0)"
+DST_DEV="$(stat -c%d "$PERSIST" 2>/dev/null || echo 1)"
+
+MODELS_BYTES="$(du -sb "$ROOT/ComfyUI/models" 2>/dev/null | cut -f1 || echo 0)"
+FREE_BYTES="$(df -B1 --output=avail "$PERSIST" 2>/dev/null | tail -1 | tr -d ' ' || echo 0)"
+
+SKIP_MODEL_COPY=0
+
+if [[ "${FORCE_MODEL_COPY:-0}" != "1" ]]; then
+  if [[ "$SRC_DEV" == "$DST_DEV" ]]; then
+    echo "跳过权重复制：源与目标在同一文件系统 (dev=$SRC_DEV)，"
+    echo "复制无法提供额外保护。清单仍会生成。"
+    echo "如确需复制：FORCE_MODEL_COPY=1 $0"
+    SKIP_MODEL_COPY=1
+  elif (( FREE_BYTES < MODELS_BYTES * 110 / 100 )); then
+    echo "跳过权重复制：空间不足。"
+    echo "  需要约 $(( MODELS_BYTES / 1024 / 1024 / 1024 ))G，可用 $(( FREE_BYTES / 1024 / 1024 / 1024 ))G"
+    SKIP_MODEL_COPY=1
+  fi
+fi
+
 SEARCH_ROOTS=(
   "$ROOT/ComfyUI/models"
 )
@@ -250,6 +298,16 @@ copy_model() {
 
   echo "Saving model:"
   echo "  $source"
+
+  # 记录尺寸供恢复时核对。hf-mirror 的 Xet 大文件会静默截断
+  # （绕过镜像直连 cas-server.xethub.hf.co 然后 401），只能按字节数核对。
+  echo "$(stat -c%s "$source") $filename" \
+    >> "$SNAPSHOT/model-sizes.txt"
+
+  if [[ "$SKIP_MODEL_COPY" == "1" ]]; then
+    echo "  (只记清单，不复制)"
+    return
+  fi
 
   rsync -ah \
     --info=progress2 \

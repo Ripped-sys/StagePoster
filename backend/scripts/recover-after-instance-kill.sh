@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="/workspace/poster-engine"
 BACKEND="$ROOT/backend"
-PERSIST="$ROOT/persist"
+PERSIST="${PERSIST_ROOT:-/workspace/persistence/stageposter}/prekill"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "Run this script as root." >&2

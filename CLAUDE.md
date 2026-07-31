@@ -298,3 +298,72 @@ After modifying code:
 - [ ] New env vars → add to `.env.example` and `main.go` `env()` calls
 - [ ] New ComfyUI node bindings → update node ID comments in `scripts/`
 - [ ] Smoke test passes: `./scripts/smoke-test.sh`
+- [ ] Full route regression: `python3 scripts/e2e-test.py all` (30 routes, 127 assertions)
+
+---
+
+## 11. Persistence and Backup
+
+The cloud host gets reset, so "which directory does this live in" is a
+correctness question, not an ops preference.
+
+### Directory contract
+
+The NFS persistence root is `/workspace/persistence`. This project uses
+`/workspace/persistence/stageposter/`, and all four data paths in `.env` point
+there:
+
+```
+DB_PATH             = /workspace/persistence/stageposter/data/poster.db
+STORAGE_ROOT        = /workspace/persistence/stageposter/storage/jobs
+ASSET_STORAGE_ROOT  = /workspace/persistence/stageposter/storage/assets
+POSTER_OUTPUT_ROOT  = /workspace/persistence/stageposter/storage/posters
+```
+
+**`backend/data/poster.db` is a stale leftover, not the live database.** It is
+still on disk and it is still what the documented `DB_PATH` *default* resolves
+to. Backing up or debugging the wrong one yields data that looks plausible but
+is days old. The only source of truth for the live path is `DB_PATH` in `.env`.
+
+### Backup
+
+```bash
+bash scripts/backup-persistence.sh          # fast
+bash scripts/backup-persistence.sh --hash   # adds weight sha256, slow
+```
+
+Output lands in `/workspace/persistence/stageposter/backups/<timestamp>/`, with
+`backups/latest` symlinked to the newest. Each contains `RESTORE.md`
+(step-by-step), a consistent DB snapshot, `env.backup`, a weight manifest, and
+git state.
+
+Three deliberate design choices — read these before changing the script:
+
+1. **The DB uses `VACUUM INTO`, not `cp`.** With the backend live, the WAL can
+   hold megabytes not yet checkpointed, so a plain copy is either stale or torn.
+   `VACUUM INTO` takes a read snapshot and folds the WAL into one file; the
+   script then runs `integrity_check` on *the snapshot*, because the claim worth
+   asserting is "this backup is usable", not "the source isn't corrupt".
+2. **`.env` must be backed up.** It is `.gitignore`d, so it is the only copy on
+   the machine.
+3. **The 43 GB of weights are not backed up, only inventoried.** There isn't
+   that much free space. The manifest exists to verify a re-download — see below.
+
+### Two traps when restoring
+
+- **Re-downloading weights requires `HF_HUB_DISABLE_XET=1`.** huggingface.co is
+  unreachable so downloads go through hf-mirror, but setting `HF_ENDPOINT` alone
+  is not enough: Xet-backed large files bypass the mirror straight to
+  `cas-server.xethub.hf.co` and 401. **Small files land, the weights don't, the
+  directory looks populated, and the exit code can still be 0.** The only
+  reliable check is byte sizes against `model-manifest.txt`.
+- **Delete the old `-wal` / `-shm` when restoring a DB**, or SQLite will apply a
+  stale WAL over the fresh file.
+
+### Explicitly out of scope
+
+`storage/` (candidates, final posters, uploaded assets, ~410 MB) exists only in
+the persistence directory. If all of `/workspace/persistence` is lost, poster
+history is lost and DB rows will reference missing files. This is a **known,
+accepted** tradeoff: outputs are regenerable and the original briefs are in the
+database.
