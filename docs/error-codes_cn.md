@@ -1,6 +1,26 @@
-tagePoster Error Codes v1.0
+# StagePoster Error Codes v1.0
 
-错误格式：RFC 9457 Problem DetailsContent-Type：application/problem+json
+> **⚠️ 历史设计稿 —— 不是实际实现的行为。**
+>
+> 本文档规定的是 `/api/v1/projects/...` 下的 RFC 9457
+> `application/problem+json` 响应。**后端两者都不存在**：没有 `/api/v1` 路由命名
+> 空间，错误一律是朴素信封：
+>
+> ```json
+> { "error": "message" }
+> ```
+>
+> 外加相应的 HTTP 状态码（`internal/api/server.go:439`）。500 响应刻意只回
+> 通用的 `{"error":"internal server error"}`，真实原因记在服务端日志里，避免
+> 泄漏文件系统路径和驱动内部信息。
+>
+> 前端应当对接的真实接口见 **`docs/frontend-api-handoff.md`**（权威）。
+>
+> 本文件作为最初的错误分类设计保留。下面的错误码命名和 HTTP 状态映射，作为
+> "系统区分了哪些错误"的参考仍然有用；但传输格式不是这样。
+
+错误格式：RFC 9457 Problem Details
+Content-Type：application/problem+json
 
 1. 标准结构
 

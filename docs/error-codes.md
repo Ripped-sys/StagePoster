@@ -1,5 +1,27 @@
 # StagePoster Error Codes v1.0
 
+> **⚠️ Historical design spec — not the implemented behaviour.**
+>
+> This document specifies RFC 9457 `application/problem+json` responses under
+> `/api/v1/projects/...`. **Neither exists in the backend.** There is no `/api/v1`
+> route namespace, and errors are returned as a plain envelope:
+>
+> ```json
+> { "error": "message" }
+> ```
+>
+> with an appropriate HTTP status (`internal/api/server.go:439`). 500 responses
+> deliberately return a generic `{"error":"internal server error"}` and log the
+> real cause server-side, so that filesystem paths and driver internals do not
+> leak.
+>
+> For the API the frontend should actually code against, see
+> **`docs/frontend-api-handoff.md`** (authoritative).
+>
+> This file is retained as the original error-taxonomy design. The code names and
+> HTTP status mapping below are still a useful reference for what errors the
+> system distinguishes; the wire format is not.
+
 Error format: RFC 9457 Problem Details
 Content-Type: `application/problem+json`
 

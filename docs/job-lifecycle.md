@@ -111,3 +111,83 @@ On startup, the backend:
 | `POST` | `/api/jobs/{jobId}/retry` | Retry failed job |
 | `GET` | `/api/jobs/{jobId}/result` | Download result |
 | `GET` | `/api/jobs/{jobId}/thumbnail` | Download thumbnail |
+
+## 9. Review and Auto-Optimization Loop
+
+After composition succeeds, `POST /api/ai/sessions/{id}/finalize` runs a bounded
+quality loop in `internal/assistant/finalize.go`.
+
+```
+compose → review(round N) ──ACCEPT──────────────→ succeeded
+                    │
+                    ├─RECOMPOSE──→ re-layout ────┐
+                    ├─REGENERATE─→ re-generate ──┤
+                    │                            └→ review(round N+1)
+                    └─REWRITE_BRIEF→ needs_user_input
+                    
+   round >= maxFinalizeReviewRounds → restore best round → completed_with_warnings
+```
+
+- `maxFinalizeReviewRounds = 2`, so there is **one** optimization attempt.
+- `ACCEPT` requires `totalScore >= domain.ReviewAcceptScore` (**82**).
+- On exhaustion, `finalizeBestAvailable` restores the highest-scoring round's
+  snapshot — a round that made things worse cannot be the delivered result.
+
+### Terminal states
+
+| State | Meaning |
+|---|---|
+| `succeeded` | Review returned `ACCEPT` |
+| `completed_with_warnings` | Rounds exhausted; best version retained |
+| `needs_user_input` | `REWRITE_BRIEF` — the brief itself conflicts |
+| `failed` | Composition or review errored |
+
+**`completed_with_warnings` is a normal, successful outcome**, not a failure. The
+poster, thumbnail and review evidence are all delivered. It is currently the
+*typical* outcome, for the reason below.
+
+### Measured behaviour (live data, 44 reviews / 15 paired posters)
+
+| Round | n | min | avg | max | ACCEPTs |
+|---|---|---|---|---|---|
+| 1 | 29 | 58 | 81.2 | 92 | 2 |
+| 2 | 15 | 65 | 79.5 | 88 | 0 |
+
+Paired per-poster round 1 → round 2 delta:
+
+| Decision | pairs | improved | unchanged | worse | avg delta |
+|---|---|---|---|---|---|
+| `REGENERATE` | 5 | 3 | 1 | 1 | **+4.8** |
+| `RECOMPOSE` | 10 | 1 | 6 | 3 | **-0.7** |
+
+So `REGENERATE` works and `RECOMPOSE` does not. 82 is reachable — round 1 peaks
+at 92 and two real `ACCEPT`s exist — so the threshold is not the problem.
+
+### Known defect: `RECOMPOSE` is frequently a no-op
+
+Three independent causes, all in the review → adjustment mapping:
+
+1. **The adjustment constants equal the template defaults.**
+   `reviewAdjustments` (`internal/poster/finalization.go:426`) sets
+   `TitleOffsetRatio = 0.055` and `PanelTopRatio = 0.81`, which are byte-for-byte
+   the `cinematic_center` defaults in `normalizeCompositionAdjustments`
+   (`internal/composer/composer.go:454`). For posters on that template the
+   recompose regenerates an **identical image**, so the VLM necessarily returns
+   an identical score. This explains the `88 → 88` cases where *every* issue code
+   matched.
+2. **Roughly half of issue codes match nothing.** The matcher does substring
+   tests against `TITLE`, `INFORMATION_PANEL`, `SPACING`, `HIERARCHY`, `LAYOUT`.
+   Measured over 86 live issues, **47 matched none** — the VLM invents codes
+   freely (`INFO_PANEL_CONTRAST`, `INFO_ZONE_CONTRAST`, and four spellings of
+   one venue concept: `VENUE_MISSING`, `VENUE_INFO_MISSING`,
+   `VENUE_TEXT_MISSING`, `MISSING_VENUE_TEXT`). Unmatched codes leave the
+   adjustment struct zero-valued, which the composer reads as "use defaults".
+3. **Adjustments do not escalate per round.** The values are constants, so a
+   second `RECOMPOSE` computes exactly what the first did.
+
+`ReviewIssue.Layer` (`generation` / `composition` / `brief`) is parsed but not
+used to route unmatched codes, which would be the natural fallback.
+
+**Do not work around this by lowering `ReviewAcceptScore`.** That changes the
+reported status without changing the poster.
+

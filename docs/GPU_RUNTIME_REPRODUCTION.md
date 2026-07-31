@@ -140,14 +140,37 @@ ss -ltnp | grep -E ':8080|:8188|:8001'
 
 ## 4. Starting vLLM
 
+> **⚠️ Superseded — do not copy the sleep-mode flags below.**
+>
+> This section records what was verified at the time of the original bring-up.
+> `--enable-sleep-mode` was later found to break generation on **ROCm 7.2 +
+> vLLM 0.20.0**: after the first sleep→wake cycle, every subsequent request
+> fails with `CUDA Error: invalid argument`.
+>
+> The production launcher (`scripts/start-all.sh`) therefore **no longer enables
+> sleep mode and never requests sleep** — it logs
+> `VLM resident (sleep mode disabled on ROCm)`. VRAM is reclaimed instead by the
+> Go runtime coordinator calling `ReleaseComfyMemory` to unload ComfyUI models
+> before a VLM call.
+>
+> Two flags must also be added that this section predates:
+> - `--mm-processor-cache-gb 0` — the 4 GB default self-corrupts after uptime,
+>   after which every image-bearing request 500s with
+>   `AssertionError: Expected a cached item for mm_hash=...`
+> - keep `VLLM_SERVER_DEV_MODE=1` **private**; it exposes unauthenticated admin
+>   endpoints on 8001.
+>
+> Use `scripts/start-all.sh` rather than the command below.
+
 ### 4.1 Stable Parameters
 
-Verified parameters for stable sleep → wake → inference cycle:
+Verified parameters for a stable sleep → wake → inference cycle *at the time of
+bring-up* (see the warning above — the sleep flag is no longer used):
 
 ```text
 VLLM_ROCM_SLEEP_MEM_CHUNK_SIZE=64
 --gpu-memory-utilization 0.65
---enable-sleep-mode
+--enable-sleep-mode           # ← superseded, breaks generation on ROCm 7.2
 ```
 
 Parameters that previously caused OOM or `cumem_allocator.cpp invalid argument`:
@@ -158,6 +181,9 @@ VLLM_ROCM_SLEEP_MEM_CHUNK_SIZE=128
 ```
 
 ### 4.2 Startup Command
+
+Historical record. The current equivalent is `scripts/start-all.sh`, which drops
+`--enable-sleep-mode` and adds `--mm-processor-cache-gb 0`.
 
 ```bash
 cd /workspace/poster-engine
@@ -191,7 +217,7 @@ nohup env \
   --gpu-memory-utilization 0.65 \
   --limit-mm-per-prompt '{"image":{"count":1,"width":768,"height":1152},"video":0}' \
   --enforce-eager \
-  --enable-sleep-mode \
+  --mm-processor-cache-gb 0 \
   --default-chat-template-kwargs '{"enable_thinking":false}' \
   --generation-config vllm \
   > /workspace/poster-engine/logs/vllm/server.log 2>&1 &
@@ -199,6 +225,7 @@ nohup env \
 echo $! > /workspace/poster-engine/vllm.pid
 echo "vLLM PID=$(cat /workspace/poster-engine/vllm.pid)"
 ```
+
 
 ### 4.3 Wait for vLLM Ready
 
@@ -472,10 +499,10 @@ nohup env \
   WORKFLOW_PATH=/workspace/poster-engine/workflows/z_image_poster_v1.json \
   PROMPT_NODE_ID='57:27' \
   SEED_NODE_ID='57:3' \
-  DB_PATH=/workspace/poster-engine/backend/data/poster.db \
-  STORAGE_ROOT=/workspace/poster-engine/backend/storage/jobs \
-  ASSET_STORAGE_ROOT=/workspace/poster-engine/backend/storage/assets \
-  POSTER_OUTPUT_ROOT=/workspace/poster-engine/backend/storage/posters \
+  DB_PATH=/workspace/persistence/stageposter/data/poster.db \
+  STORAGE_ROOT=/workspace/persistence/stageposter/storage/jobs \
+  ASSET_STORAGE_ROOT=/workspace/persistence/stageposter/storage/assets \
+  POSTER_OUTPUT_ROOT=/workspace/persistence/stageposter/storage/posters \
   WORKFLOW_KEY=poster-text \
   WORKFLOW_VERSION=1.0.0 \
   RECONCILE_INTERVAL=2s \

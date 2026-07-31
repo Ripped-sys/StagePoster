@@ -436,83 +436,15 @@ func (c *Composer) Compose(
 	}, nil
 }
 
+// normalizeCompositionAdjustments 委托给 domain。
+//
+// 默认值和夹取区间移到了 domain.NormalizeCompositionAdjustments，因为审查循环
+// 也需要解析"某模板的生效值"才能在其上做增量。留这个薄封装是为了不动
+// composer 内部的调用点和既有测试。
 func normalizeCompositionAdjustments(
 	adjustments domain.CompositionAdjustments,
 ) domain.CompositionAdjustments {
-	switch strings.ToLower(
-		strings.TrimSpace(adjustments.Template),
-	) {
-	case "editorial_top":
-		if adjustments.TitleOffsetRatio == 0 {
-			adjustments.TitleOffsetRatio = 0.035
-		}
-
-		if adjustments.PanelTopRatio == 0 {
-			adjustments.PanelTopRatio = 0.80
-		}
-
-	case "cinematic_center":
-		if adjustments.TitleOffsetRatio == 0 {
-			adjustments.TitleOffsetRatio = 0.055
-		}
-
-		if adjustments.PanelTopRatio == 0 {
-			adjustments.PanelTopRatio = 0.81
-		}
-
-		if strings.TrimSpace(
-			adjustments.PanelTheme,
-		) == "" {
-			adjustments.PanelTheme = "dark"
-		}
-
-	case "gothic_frame":
-		if adjustments.TitleOffsetRatio == 0 {
-			adjustments.TitleOffsetRatio = 0.045
-		}
-
-		if adjustments.PanelTopRatio == 0 {
-			adjustments.PanelTopRatio = 0.82
-		}
-
-		if strings.TrimSpace(
-			adjustments.PanelTheme,
-		) == "" {
-			adjustments.PanelTheme = "dark"
-		}
-	}
-
-	if adjustments.PanelTopRatio == 0 {
-		adjustments.PanelTopRatio = 0.77
-	}
-
-	if adjustments.PanelTopRatio < 0.70 {
-		adjustments.PanelTopRatio = 0.70
-	}
-
-	if adjustments.PanelTopRatio > 0.86 {
-		adjustments.PanelTopRatio = 0.86
-	}
-
-	if adjustments.TitleOffsetRatio < 0 {
-		adjustments.TitleOffsetRatio = 0
-	}
-
-	if adjustments.TitleOffsetRatio > 0.12 {
-		adjustments.TitleOffsetRatio = 0.12
-	}
-
-	switch strings.ToLower(
-		strings.TrimSpace(adjustments.PanelTheme),
-	) {
-	case "dark":
-		adjustments.PanelTheme = "dark"
-
-	default:
-		adjustments.PanelTheme = "light"
-	}
-
-	return adjustments
+	return domain.NormalizeCompositionAdjustments(adjustments)
 }
 
 func informationPanelColors(

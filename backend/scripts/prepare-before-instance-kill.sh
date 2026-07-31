@@ -11,6 +11,39 @@ BACKEND="$ROOT/backend"
 # "PERSISTENCE PREPARATION COMPLETE"，然后连同备份一起消失。
 PERSIST="${PERSIST_ROOT:-/workspace/persistence/stageposter}/prekill"
 
+# .env 的位置要和 start-all.sh 的解析顺序一致：优先 backend/.env，
+# 否则项目根的 .env。
+#
+# 原先 prepare 和 recover 都只认 "$BACKEND/.env"，而这台机器上真实配置在
+# "$ROOT/.env"（backend/.env 根本不存在）。两个后果：
+#   1. prepare 从来没备份过 .env —— 而它被 .gitignore 掉，是机器上唯一的副本。
+#   2. recover 会用 backend/.env.example（另一份 1796 字节的陈旧模板）创建
+#      backend/.env，而它在 start-all.sh 里**优先级更高**，于是恢复动作本身
+#      会用陈旧模板悄悄盖掉真实配置。
+if [[ -f "$BACKEND/.env" ]]; then
+  ENV_FILE="$BACKEND/.env"
+else
+  ENV_FILE="$ROOT/.env"
+fi
+
+# venv 路径从 .env 读，和 start-all.sh / install-comfyui.sh 保持一致。
+#
+# 原先写死 "$ROOT/venv"，而 .env 里是 COMFY_VENV=/workspace/venv ——
+# 在项目目录之外。后果：save_python_runtime "comfyui" 拿到一个不存在的路径，
+# 打印 "missing" 就返回，于是 prekill 目录里只有 vllm-python-runtime.env，
+# 从来没有 comfyui 的。而 recover 脚本又要验证这个 venv，直接 exit 1。
+if [[ -f "$ENV_FILE" ]]; then
+  COMFY_VENV="${COMFY_VENV:-$(
+    grep -E '^COMFY_VENV=' "$ENV_FILE" | tail -1 | cut -d= -f2- || true
+  )}"
+  VLLM_VENV="${VLLM_VENV:-$(
+    grep -E '^VLLM_VENV=' "$ENV_FILE" | tail -1 | cut -d= -f2- || true
+  )}"
+fi
+
+COMFY_VENV="${COMFY_VENV:-$ROOT/venv}"
+VLLM_VENV="${VLLM_VENV:-$ROOT/.venv-vllm}"
+
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 SNAPSHOT="$PERSIST/snapshots/$STAMP"
 
@@ -46,8 +79,8 @@ echo "===== SQLITE CHECKPOINT AND BACKUP ====="
 # 线上库由 .env 的 DB_PATH 指向持久化目录。写死的结果是备份了一份陈旧数据
 # （实测 13 行 vs 线上 56 行）并且报告成功，这比备份失败更危险。
 DB_PATH=""
-if [[ -f "$ROOT/.env" ]]; then
-  DB_PATH="$(grep -E '^DB_PATH=' "$ROOT/.env" | tail -1 | cut -d= -f2- || true)"
+if [[ -f "$ENV_FILE" ]]; then
+  DB_PATH="$(grep -E '^DB_PATH=' "$ENV_FILE" | tail -1 | cut -d= -f2- || true)"
 fi
 DB_PATH="${DB_PATH:-$BACKEND/data/poster.db}"
 
@@ -75,14 +108,26 @@ fi
 echo
 echo "===== SAVE ENVIRONMENT ====="
 
-if [[ -f "$BACKEND/.env" ]]; then
+echo "ENV_FILE=$ENV_FILE"
+
+if [[ -f "$ENV_FILE" ]]; then
   install -m 600 \
-    "$BACKEND/.env" \
+    "$ENV_FILE" \
     "$PERSIST/private/backend.env"
+
+  # 记下它原本在哪，recover 才能还原到同一个位置。
+  # 还原错位置比不还原更糟：backend/.env 在 start-all.sh 里优先级更高。
+  printf '%s\n' "$ENV_FILE" \
+    > "$PERSIST/private/backend.env.origin"
+
+  echo "Saved $ENV_FILE -> $PERSIST/private/backend.env"
+else
+  echo "WARNING: no .env found at $ENV_FILE"
+  echo "配置是 .gitignore 掉的，机器上只有这一份，丢了要手工重建。"
 fi
 
 cp -a \
-  "$BACKEND/.env.example" \
+  "$ROOT/.env.example" \
   "$SNAPSHOT/" \
   2>/dev/null || true
 
@@ -183,8 +228,8 @@ echo "===== RECORD SYSTEM VERSIONS ====="
   hipcc --version || true
   echo
 
-  "$ROOT/venv/bin/python" --version || true
-  "$ROOT/.venv-vllm/bin/python" --version || true
+  "$COMFY_VENV/bin/python" --version || true
+  "$VLLM_VENV/bin/python" --version || true
 } > "$SNAPSHOT/system-versions.txt"
 
 echo
@@ -444,11 +489,52 @@ save_python_runtime() {
 
 save_python_runtime \
   "comfyui" \
-  "$ROOT/venv/bin/python"
+  "$COMFY_VENV/bin/python"
 
 save_python_runtime \
   "vllm" \
-  "$ROOT/.venv-vllm/bin/python"
+  "$VLLM_VENV/bin/python"
+
+echo
+echo "===== ARCHIVE PYTHON PACKAGE LISTS ====="
+
+# 24G 的 site-packages（ComfyUI 16G + vLLM 8.3G）备份不了，也不该备份 ——
+# 里面是 ROCm 版 torch 这类可重新安装的东西。
+#
+# 但 save_python_runtime 只处理**解释器**，不碰 site-packages。ComfyUI 那个
+# venv 的 bin/python 解析到 /usr/bin/python3.10，函数判定"系统解释器，重装即可"
+# 就返回了 —— 于是 16G 依赖既没被复制，也没留下任何重建依据。
+#
+# pip freeze 只有几十 KB，却是这 24G 唯一的重建依据。不存清单，
+# 恢复时就只能靠 install-*.sh 拉最新版本，而版本漂移在 ROCm 上是会出事的。
+freeze_venv() {
+  local name="$1"
+  local venv="$2"
+  local out="$PERSIST/private/${name}-requirements.txt"
+
+  if [[ ! -x "$venv/bin/python" ]]; then
+    echo "$name: 解释器不存在，跳过 ($venv)"
+    return
+  fi
+
+  if "$venv/bin/python" -m pip freeze > "$out" 2>/dev/null; then
+    chmod 600 "$out"
+    echo "$name: $(wc -l < "$out") 个包 -> $out"
+    cp -a "$out" "$SNAPSHOT/${name}-requirements.txt"
+  else
+    echo "$name: pip freeze 失败"
+    rm -f "$out"
+  fi
+}
+
+freeze_venv "comfyui" "$COMFY_VENV"
+freeze_venv "vllm" "$VLLM_VENV"
+
+{
+  echo "COMFY_VENV=$COMFY_VENV"
+  echo "VLLM_VENV=$VLLM_VENV"
+  du -sh "$COMFY_VENV" "$VLLM_VENV" 2>/dev/null || true
+} > "$SNAPSHOT/venv-locations.txt"
 
 echo
 echo "===== CHECKSUMS ====="
