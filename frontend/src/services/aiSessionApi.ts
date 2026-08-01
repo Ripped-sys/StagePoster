@@ -1,3 +1,5 @@
+import type {VisualAnalysis} from '../types';
+
 export type AIAction =
   | 'send_message'
   | 'attach_asset'
@@ -70,6 +72,7 @@ export interface AICandidate {
   selected: boolean;
   imageUrl?: string;
   error?: string;
+  visualAnalysis?: VisualAnalysis;
   spec?: {
     motif?: string;
     composition?: string;
@@ -77,6 +80,7 @@ export interface AICandidate {
     materials?: string[];
     palette?: string[];
     lighting?: string;
+    visualAnalysis?: VisualAnalysis;
   };
 }
 

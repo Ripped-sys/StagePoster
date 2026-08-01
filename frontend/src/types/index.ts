@@ -17,8 +17,13 @@ export interface GenerationCandidate{
   seed?:number;
   error?:string;
   imageUrl?:string;
-  spec?:{motif?:string;composition?:string;camera?:string;materials?:string[];palette?:string[];lighting?:string};
+  visualAnalysis?:VisualAnalysis;
+  spec?:{motif?:string;composition?:string;camera?:string;materials?:string[];palette?:string[];lighting?:string;visualAnalysis?:VisualAnalysis};
 }
+export interface NormalizedRegion{x:number;y:number;w:number;h:number}
+export interface TextSafeZone extends NormalizedRegion{align?:'left'|'center'|'right';priority?:number}
+export interface TypographyProfile{family?:string;weight?:number;fillColor?:string;strokeColor?:string;distress?:number}
+export interface VisualAnalysis{palette?:string[];dominantColors?:string[];contrast?:'low'|'medium'|'high'|string;brightness?:number|string;texture?:string;style?:string;typographyProfile?:TypographyProfile;subjectBounds?:NormalizedRegion[];textSafeZones?:TextSafeZone[];logoSafeZone?:NormalizedRegion;hasGeneratedText?:boolean;ocrDetections?:Array<{text?:string;region?:NormalizedRegion}>;analysisStatus?:string;error?:string}
 export interface GenerationTask{
   id:string;
   projectId:string;
@@ -35,6 +40,8 @@ export interface GenerationTask{
   elapsedSeconds?:number;
   etaSeconds?:number;
   selectedCandidateId?:string;
+  composerTemplate?:string;
+  palette?:string[];
 }
 
 export interface ReviewScores{requirementAlignment?:number;composition?:number;typography?:number;readability?:number;visualQuality?:number;brandConsistency?:number}

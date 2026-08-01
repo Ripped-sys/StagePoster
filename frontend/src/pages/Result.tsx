@@ -15,63 +15,37 @@ import AssetUpload from "../components/AssetUpload";
 import Brand from "../components/Brand";
 import PosterPreview from "../components/PosterPreview";
 import PosterLanguageToggle from "../components/PosterLanguageToggle";
+import PublishPoster from "../components/PublishPoster";
 import SiteLanguageToggle from "../components/SiteLanguageToggle";
 import { posterApi } from "../services/posterApi";
 import { useStore } from "../store";
 import type { Participant, PosterProject } from "../types";
 import type {ImageMetadata, PosterReview, PosterTimeline, RuntimeEvidence} from "../types";
-import { formatPosterLocation, localizedPosterCopy } from "../utils/posterLanguage";
+import { localizedPosterCopy } from "../utils/posterLanguage";
 import {useSiteLanguage} from "../hooks/useSiteLanguage";
 
-async function renderRemotePublishPng(project: PosterProject, imageUrl: string) {
-  const copy = localizedPosterCopy(project);
-  const canvas = document.createElement("canvas");
+async function renderElementPublishPng(node: HTMLElement) {
+  await document.fonts.ready;
+  for (const image of Array.from(node.querySelectorAll('img'))) {
+    if (!image.complete) await image.decode();
+  }
+  const source = await toPng(node, {
+    pixelRatio: Math.max(2, 1024 / Math.max(1, node.clientWidth)),
+    cacheBust: false,
+  });
+  const rendered = new Image();
+  rendered.src = source;
+  await rendered.decode();
+  const canvas = document.createElement('canvas');
   canvas.width = 1024;
   canvas.height = 1536;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("浏览器无法创建海报画布");
-  const image = new Image();
-  await new Promise<void>((resolve, reject) => {
-    const timeout = window.setTimeout(() => reject(new Error("生成图片加载超时，请稍后重试")), 20_000);
-    image.onload = () => { window.clearTimeout(timeout); resolve(); };
-    image.onerror = () => { window.clearTimeout(timeout); reject(new Error("生成图片无法读取")); };
-    image.src = imageUrl;
-  });
-  const scale = Math.max(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight);
-  const width = image.naturalWidth * scale;
-  const height = image.naturalHeight * scale;
-  context.drawImage(image, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
-  const shade = context.createLinearGradient(0, 0, 0, canvas.height);
-  shade.addColorStop(0, "rgba(0,0,0,.72)");
-  shade.addColorStop(.48, "rgba(0,0,0,.08)");
-  shade.addColorStop(1, "rgba(0,0,0,.9)");
-  context.fillStyle = shade;
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  const pad = 82;
-  context.fillStyle = "#ff784d";
-  context.font = "700 22px Arial";
-  context.fillText("POSTER VISUAL LAB · AMD ROCm", pad, 96);
-  context.fillStyle = "#ffffff";
-  context.font = "800 74px Arial, Microsoft YaHei";
-  const title = copy.title;
-  context.fillText(title.slice(0, 18), pad, 190);
-  context.fillStyle = "#f1dccd";
-  context.font = "400 24px Arial, Microsoft YaHei";
-  context.fillText(copy.theme.slice(0, 40), pad, 236);
-  context.strokeStyle = "rgba(255,255,255,.55)";
-  context.beginPath(); context.moveTo(pad, 1190); context.lineTo(canvas.width - pad, 1190); context.stroke();
-  context.fillStyle = "#ffffff";
-  context.font = "800 34px Arial, Microsoft YaHei";
-  context.fillText(copy.bands.map((band) => band.displayName).join("  ·  ").slice(0, 34) || copy.subject, pad, 1270);
-  const columns = [[copy.labels.date, project.dateTime], [copy.labels.venue, formatPosterLocation(copy.city, copy.venue)], [copy.labels.ticket, project.price || copy.ticketInfo]];
-  const columnWidth = (canvas.width - pad * 2) / columns.length;
-  columns.forEach(([label, value], index) => {
-    const x = pad + columnWidth * index;
-    context.fillStyle = "#ff784d"; context.font = "700 16px Arial"; context.fillText(label, x, 1340);
-    context.fillStyle = "#ffffff"; context.font = "700 24px Arial, Microsoft YaHei"; context.fillText(String(value || copy.labels.pending).slice(0, 24), x, 1380);
-  });
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('浏览器无法创建海报画布');
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(rendered, 0, 0, 1024, 1536);
   return await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("海报导出失败")), "image/png");
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('海报导出失败')), 'image/png');
   });
 }
 
@@ -183,12 +157,13 @@ export default function Result() {
       let href = "";
       if (task?.source === "w7900" && imageUrl) {
         try {
-          const blob = await withTimeout(renderRemotePublishPng(project, imageUrl), 15_000);
+          if (!ref.current) throw new Error('发布版尚未准备好');
+          const blob = await withTimeout(renderElementPublishPng(ref.current), 15_000);
           href = URL.createObjectURL(blob);
-        } catch {
-          // A browser can reject canvas export for a remote image. Keep the
-          // generated visual downloadable instead of leaving the button inert.
-          href = imageUrl;
+        } catch (reason) {
+          throw new Error(reason instanceof Error
+            ? `发布版导出失败：${reason.message}`
+            : '发布版导出失败，请稍后重试');
         }
       } else if (ref.current) {
         href = await toPng(ref.current, {
@@ -219,7 +194,7 @@ export default function Result() {
     setBusy(true);
     try {
       if (task?.source === "w7900" && imageUrl) {
-        const blob = await renderRemotePublishPng(project, imageUrl);
+        const blob = await renderElementPublishPng(ref.current!);
         setLightbox(URL.createObjectURL(blob));
       } else {
         setLightbox(await toPng(ref.current!, {pixelRatio: 2, cacheBust: true}));
@@ -250,6 +225,7 @@ export default function Result() {
   const evidenceMetrics = timeline?.metrics;
   const selectedCandidate = task?.candidates?.find((candidate) => candidate.candidateId === task.selectedCandidateId)
     ?? task?.candidates?.find((candidate) => candidate.selected);
+  const selectedAnalysis = selectedCandidate?.visualAnalysis ?? selectedCandidate?.spec?.visualAnalysis;
   const scoreRows: Array<[string, number | undefined]> = [
     [english ? 'Requirement alignment' : '需求匹配', reviewScores?.requirementAlignment],
     [english ? 'Composition' : '构图', reviewScores?.composition],
@@ -284,17 +260,7 @@ export default function Result() {
           </div>
           {task?.source === "w7900" ? (
             imageUrl ? (
-              <div className="session-publish-poster result-publish-poster" ref={ref}>
-                <img className="session-publish-visual" src={imageUrl} alt={`${posterCopy.title} AI 主视觉`}/>
-                <div className="session-publish-shade"/>
-                <div className="session-publish-copy">
-                  <small>POSTER VISUAL LAB · AMD ROCm</small>
-                  <h2>{posterCopy.title}</h2><p>{posterCopy.theme}</p>
-                  <div className="session-publish-bands">{posterCopy.bands.map((band) => <span key={band.id}>{band.logo?.dataUrl ? <img src={band.logo.dataUrl} alt={`${band.displayName} Logo`}/> : <b>{band.displayName}</b>}</span>)}</div>
-                  <dl><div><dt>{posterCopy.labels.date}</dt><dd>{project.dateTime}</dd></div><div><dt>{posterCopy.labels.venue}</dt><dd>{formatPosterLocation(posterCopy.city, posterCopy.venue)}</dd></div>{project.price && <div><dt>{posterCopy.labels.ticket}</dt><dd>{project.price}</dd></div>}</dl>
-                  {project.assets.qr?.dataUrl && <img className="session-publish-qr" src={project.assets.qr.dataUrl} alt="购票二维码"/>}
-                </div>
-              </div>
+              <PublishPoster project={project} visualUrl={imageUrl} nodeRef={ref} palette={task?.palette ?? selectedCandidate?.spec?.palette} template={task?.composerTemplate} analysis={selectedCandidate?.visualAnalysis ?? selectedCandidate?.spec?.visualAnalysis}/>
             ) : imageError ? (
               <div className="gpu-result loading-result error-state" role="alert">
                 <AlertTriangle />
@@ -356,11 +322,25 @@ export default function Result() {
                 </div>
               ))}
               {!isRemoteResult && <div className="warning-box"><b>当前不是 GPU 实际输出</b><p>此页面用于检查信息图层、布局与 PNG 导出；连接远程生成服务后才能进行最终发布检查。</p></div>}
+              {isRemoteResult && <section className="adaptive-evidence" aria-label="Adaptive compositor evidence">
+                <header><div><small>ADAPTIVE COMPOSITOR</small><h3>{english ? 'Background-aware typography' : '背景驱动排版证据'}</h3></div><strong className={selectedAnalysis?.hasGeneratedText === false ? 'accepted' : 'warning'}>{selectedAnalysis ? (selectedAnalysis.hasGeneratedText === false ? 'CLEAN' : 'CHECK') : 'N/A'}</strong></header>
+                {selectedAnalysis ? <>
+                  <div className="adaptive-metrics">
+                    <div><small>{english ? 'Text-safe zones' : '文字安全区'}</small><b>{selectedAnalysis.textSafeZones?.length ?? 0}</b></div>
+                    <div><small>{english ? 'Protected subjects' : '主体保护区'}</small><b>{selectedAnalysis.subjectBounds?.length ?? 0}</b></div>
+                    <div><small>{english ? 'Contrast' : '背景对比度'}</small><b>{selectedAnalysis.contrast ?? '—'}</b></div>
+                    <div><small>{english ? 'OCR detections' : 'OCR 文字'}</small><b>{selectedAnalysis.ocrDetections?.length ?? 0}</b></div>
+                  </div>
+                  <div className="adaptive-palette">{(selectedAnalysis.palette ?? selectedAnalysis.dominantColors ?? selectedCandidate?.spec?.palette ?? []).map((color) => <i key={color} style={{background: color}} title={color}/>)}</div>
+                  <p>{selectedAnalysis.texture || selectedAnalysis.style || (english ? 'Backend analysed layout is active.' : '已使用后端分析结果选择字体、颜色和文字位置。')}</p>
+                  {selectedAnalysis.hasGeneratedText !== false && <div className="warning-box"><b>{english ? 'Generated text needs review' : '检测到模型文字风险'}</b><p>{english ? 'Inspect the raw visual before publishing.' : '请在发布前检查原始主视觉；前端不会将此状态伪装为通过。'}</p></div>}
+                </> : <p>{english ? 'The backend did not provide visual analysis for this legacy result. Conservative layout is active.' : '该历史结果未提供视觉分析，当前使用保守安全布局。'}</p>}
+              </section>}
               {isRemoteResult && <section className="quality-review" aria-label="AI quality review">
-                <header><div><small>AI QUALITY REVIEW</small><h3>{english ? 'Visual quality evidence' : '视觉质量证据'}</h3></div><strong className={latestReview && latestReview.totalScore >= 82 ? 'accepted' : 'warning'}>{latestReview ? `${latestReview.totalScore}/100` : '—'}</strong></header>
+                <header><div><small>AI QUALITY REVIEW</small><h3>{english ? 'Visual quality evidence' : '视觉质量证据'}</h3></div><strong className={latestReview && /accept/i.test(latestReview.decision) ? 'accepted' : 'warning'}>{latestReview ? `${latestReview.totalScore}/100` : '—'}</strong></header>
                 {latestReview ? <>
                   <div className="quality-score-grid">{scoreRows.map(([label, score]) => <div key={label}><span>{label}<b>{score == null ? '—' : displayScore(score)}</b></span><i><em style={{width: `${displayScore(score)}%`}}/></i></div>)}</div>
-                  <p className="quality-decision"><b>{latestReview.decision}</b> · {latestReview.totalScore >= 82 ? (english ? 'Accepted for publish' : '达到发布标准') : (english ? 'Usable result with optimization advice' : '成品可用，仍有优化建议')}</p>
+                  <p className="quality-decision"><b>{latestReview.decision}</b> · {/accept/i.test(latestReview.decision) ? (english ? 'Accepted for publish' : '达到发布标准') : (english ? 'Best available result retained; review the advice before publishing' : '已保留当前最佳版本，发布前请检查优化建议')}</p>
                   {!!reviewFailures?.length && <div className="quality-failures"><b>{english ? 'Hard failures' : '硬失败项'}</b>{reviewFailures.map((failure) => <p key={failure.code}><strong>{failure.code}</strong>{failure.description}</p>)}</div>}
                   {!!reviewIssues?.length && <div className="quality-issues"><b>{english ? 'Review findings' : '审查发现'}</b>{reviewIssues.map((issue) => <article key={`${issue.code}-${issue.description}`}><span>{issue.severity}</span><strong>{issue.description}</strong>{issue.suggestion && <p>{issue.suggestion}</p>}</article>)}</div>}
                 </> : <p>{english ? 'No visual review has been recorded yet.' : '尚未产生视觉复审记录。'}</p>}

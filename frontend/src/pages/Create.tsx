@@ -19,14 +19,19 @@ import { demoProject, emptyProject, styles } from "../data/mock";
 import { useStore } from "../store";
 import type { Participant, PosterProject, SceneType } from "../types";
 import {useSiteLanguage} from "../hooks/useSiteLanguage";
-const scenes: [SceneType, string, string][] = [
-  ["concert", "音乐演出", "乐队、Livehouse 与巡演"],
-  ["festival", "音乐节", "多艺人、多舞台阵容"],
-  ["lecture", "讲座", "主讲人、主题与机构"],
-  ["competition", "比赛", "赛事、奖项与报名"],
-  ["commercial", "商业活动", "品牌、产品与转化"],
-  ["custom", "自定义", "保留核心四要素"],
+const scenes: [SceneType, string, string, string, string][] = [
+  ["concert", "音乐演出", "乐队、Livehouse 与巡演", "Live Performance", "Bands, livehouses and tours"],
+  ["festival", "音乐节", "多艺人、多舞台阵容", "Music Festival", "Multi-artist and multi-stage lineups"],
+  ["lecture", "讲座", "主讲人、主题与机构", "Talk", "Speaker, topic and organizer"],
+  ["competition", "比赛", "赛事、奖项与报名", "Competition", "Event, awards and registration"],
+  ["commercial", "商业活动", "品牌、产品与转化", "Commercial Event", "Brand, product and conversion"],
+  ["custom", "自定义", "保留核心四要素", "Custom", "Keep the four core facts"],
 ];
+const styleEnglish: Record<string, {tagline: string; composition: string}> = {
+  rock: {tagline: 'Dark · warm orange · grain · live energy', composition: 'Dual-subject tension · rough display type · stage backlight'},
+  cyber: {tagline: 'Purple · cyan · digital noise · future live', composition: 'Central perspective · signal glitches · hard rim light'},
+  editorial: {tagline: 'Restrained · modern · editorial', composition: 'Asymmetric grid · generous space · clear hierarchy'},
+};
 const Field = ({
   label,
   value,
@@ -62,6 +67,7 @@ const Field = ({
 );
 export default function Create() {
   const {english} = useSiteLanguage();
+  const t = (zh: string, en: string) => english ? en : zh;
   const [params] = useSearchParams();
   const { save, projects } = useStore();
   const [project, setProject] = useState<PosterProject>(() => {
@@ -103,14 +109,14 @@ export default function Create() {
   );
   const validate = () => {
     const next: Record<string, string> = {};
-    if (!project.scene) next.scene = "请选择一个海报场景";
-    if (!project.title.trim()) next.title = "请填写活动名称";
-    if (!project.theme.trim()) next.theme = "请填写活动主题";
-    if (!project.dateTime.trim()) next.dateTime = "请填写日期和时间";
-    if (!project.venue.trim()) next.venue = "请填写场地名称";
-    if (!project.subject.trim()) next.subject = "请填写活动主体";
+    if (!project.scene) next.scene = t("请选择一个海报场景", "Choose a poster scenario");
+    if (!project.title.trim()) next.title = t("请填写活动名称", "Enter the event title");
+    if (!project.theme.trim()) next.theme = t("请填写活动主题", "Enter the event theme");
+    if (!project.dateTime.trim()) next.dateTime = t("请填写日期和时间", "Enter the date and time");
+    if (!project.venue.trim()) next.venue = t("请填写场地名称", "Enter the venue");
+    if (!project.subject.trim()) next.subject = t("请填写活动主体", "Enter the event subject");
     if (project.scene === "concert" && !project.bands.length)
-      next.bands = "至少添加一支乐队";
+      next.bands = t("至少添加一支乐队", "Add at least one band");
     setErrors(next);
     if (Object.keys(next).length) {
       setStep(next.scene ? 0 : 1);
@@ -155,7 +161,7 @@ export default function Create() {
           : "rock";
     set("styleId", id);
     setNotice(
-      `Mock 建议：${styles.find((s) => s.id === id)?.name}，请确认后再生成。`,
+      t(`Mock 建议：${styles.find((s) => s.id === id)?.name}，请确认后再生成。`, `Mock suggestion: ${styles.find((s) => s.id === id)?.name}. Confirm it before generation.`),
     );
   };
   return (
@@ -173,7 +179,7 @@ export default function Create() {
       <div className="workspace-grid">
         <aside className="steps">
           <p className="eyebrow">CREATE FLOW</p>
-          {["选择场景", "信息与素材", "视觉风格", "输出确认"].map((x, i) => (
+          {(english ? ["Scenario", "Information & assets", "Visual direction", "Output"] : ["选择场景", "信息与素材", "视觉风格", "输出确认"]).map((x, i) => (
             <button
               key={x}
               className={i === step ? "active" : i < step ? "done" : ""}
@@ -183,7 +189,7 @@ export default function Create() {
               <span>
                 {x}
                 <small>
-                  {i === step ? "当前步骤" : i < step ? "已完成" : "等待中"}
+                  {i === step ? t("当前步骤", "Current") : i < step ? t("已完成", "Complete") : t("等待中", "Waiting")}
                 </small>
               </span>
               <ChevronRight />
@@ -191,7 +197,7 @@ export default function Create() {
           ))}
           <div className="completion">
             <span>
-              项目完成度 <b>{completion}%</b>
+              {t("项目完成度", "Project completion")} <b>{completion}%</b>
             </span>
             <i>
               <em style={{ width: `${completion}%` }} />
@@ -205,7 +211,7 @@ export default function Create() {
                 ?.focus()
             }
           >
-            <Bot /> AI 项目助理<small>对话提取 · 确认后写入</small>
+            <Bot /> {t("AI 项目助理", "AI Project Assistant")}<small>{t("对话提取 · 确认后写入", "Extract in chat · write only after confirmation")}</small>
           </button>
         </aside>
         <section className="form-panel" ref={mainRef}>
@@ -219,21 +225,21 @@ export default function Create() {
           {step === 0 && (
             <div className="form-section">
               <p className="eyebrow">STEP 01 / SCENARIO</p>
-              <h1>这次要做什么海报？</h1>
-              <p>场景决定接下来出现的字段；核心信息始终由你确认。</p>
+              <h1>{t("这次要做什么海报？", "What are we creating?")}</h1>
+              <p>{t("场景决定接下来出现的字段；核心信息始终由你确认。", "The scenario controls the next fields. You always confirm the core facts.")}</p>
               {errors.scene && (
                 <p className="field-error error-anchor">{errors.scene}</p>
               )}
               <div className="scene-grid">
-                {scenes.map(([id, name, desc], i) => (
+                {scenes.map(([id, nameZh, descZh, nameEn, descEn], i) => (
                   <button
                     key={id}
                     onClick={() => set("scene", id)}
                     className={project.scene === id ? "selected" : ""}
                   >
                     <small>0{i + 1}</small>
-                    <b>{name}</b>
-                    <span>{desc}</span>
+                    <b>{english ? nameEn : nameZh}</b>
+                    <span>{english ? descEn : descZh}</span>
                     {project.scene === id && <Check />}
                   </button>
                 ))}
@@ -243,52 +249,52 @@ export default function Create() {
           {step === 1 && (
             <div className="form-section">
               <p className="eyebrow">STEP 02 / INFORMATION & ASSETS</p>
-              <h1>准确的信息，独立的素材</h1>
-              <p>人物、场地、Logo 与二维码承担不同职责，不会混在同一上传框。</p>
-              <h2>核心信息</h2>
+              <h1>{t("准确的信息，独立的素材", "Accurate facts, independent assets")}</h1>
+              <p>{t("人物、场地、Logo 与二维码承担不同职责，不会混在同一上传框。", "People, venues, logos and QR codes keep separate roles and upload slots.")}</p>
+              <h2>{t("核心信息", "Core information")}</h2>
               <div className="fields two">
                 <Field
-                  label="活动名称"
+                  label={t("活动名称", "Event title")}
                   value={project.title}
                   onChange={(v) => set("title", v)}
                   required
                   error={errors.title}
                 />
                 <Field
-                  label="活动主体"
+                  label={t("活动主体", "Subject / artist")}
                   value={project.subject}
                   onChange={(v) => set("subject", v)}
                   required
                   error={errors.subject}
                 />
                 <Field
-                  label="活动主题"
+                  label={t("活动主题", "Theme")}
                   value={project.theme}
                   onChange={(v) => set("theme", v)}
                   required
                   error={errors.theme}
                 />
                 <Field
-                  label="日期和时间"
+                  label={t("日期和时间", "Date and time")}
                   value={project.dateTime}
                   onChange={(v) => set("dateTime", v)}
                   required
                   error={errors.dateTime}
                 />
                 <Field
-                  label="城市"
+                  label={t("城市", "City")}
                   value={project.city}
                   onChange={(v) => set("city", v)}
                 />
                 <Field
-                  label="场地名称"
+                  label={t("场地名称", "Venue")}
                   value={project.venue}
                   onChange={(v) => set("venue", v)}
                   required
                   error={errors.venue}
                 />
               </div>
-              <h2>英文主视觉文案 <small className="optional-copy">可选 · 留空时沿用中文原文</small></h2>
+              <h2>{t("英文主视觉文案", "English poster copy")} <small className="optional-copy">{t("可选 · 留空时沿用中文原文", "Optional · falls back to Chinese when blank")}</small></h2>
               <div className="fields two bilingual-fields">
                 <Field label="活动名称 / TITLE" value={project.titleEn ?? ""} onChange={(v) => set("titleEn", v)} />
                 <Field label="活动主体 / SUBJECT" value={project.subjectEn ?? ""} onChange={(v) => set("subjectEn", v)} />
@@ -299,7 +305,7 @@ export default function Create() {
               </div>
               <div className="uploads two">
                 <AssetUpload
-                  label="场地照片"
+                  label={t("场地照片", "Venue photo")}
                   kind="venue"
                   value={project.assets.venue}
                   onChange={(v) =>
@@ -307,7 +313,7 @@ export default function Create() {
                   }
                 />
                 <AssetUpload
-                  label="添加参考海报（可选）"
+                  label={t("添加参考海报（可选）", "Add reference poster (optional)")}
                   kind="reference"
                   value={project.assets.reference}
                   onChange={(v) =>
@@ -319,11 +325,11 @@ export default function Create() {
                 <>
                   <div className="section-title">
                     <div>
-                      <h2>乐队列表</h2>
-                      <p>每支乐队的名称、Logo 与人物素材保持绑定。</p>
+                      <h2>{t("乐队列表", "Band lineup")}</h2>
+                      <p>{t("每支乐队的名称、Logo 与人物素材保持绑定。", "Each band keeps its name, logo and people assets bound together.")}</p>
                     </div>
                     <button className="ghost-button" onClick={addBand}>
-                      <Plus /> 添加乐队
+                      <Plus /> {t("添加乐队", "Add band")}
                     </button>
                   </div>
                   {errors.bands && (
@@ -333,19 +339,19 @@ export default function Create() {
                     {project.bands.map((b, i) => (
                       <article key={b.id}>
                         <header>
-                          <b>乐队 0{i + 1}</b>
+                          <b>{t("乐队", "Band")} 0{i + 1}</b>
                           <button onClick={() => removeBand(b.id)}>
                             <Trash2 />
                           </button>
                         </header>
                         <div className="fields two">
                           <Field
-                            label="乐队名称"
+                            label={t("乐队名称", "Band name")}
                             value={b.name}
                             onChange={(v) => updateBand(b.id, { name: v })}
                           />
                           <Field
-                            label="音乐风格"
+                            label={t("音乐风格", "Music genre")}
                             value={b.genre}
                             onChange={(v) => updateBand(b.id, { genre: v })}
                           />
@@ -362,13 +368,13 @@ export default function Create() {
                         </div>
                         <div className="uploads three">
                           <AssetUpload
-                            label="原始 Logo"
+                            label={t("原始 Logo", "Original logo")}
                             kind="logo"
                             value={b.logo}
                             onChange={(v) => updateBand(b.id, { logo: v })}
                           />
                           <AssetUpload
-                            label="成员合照"
+                            label={t("成员合照", "Band photo")}
                             kind="person"
                             value={b.groupPhoto}
                             onChange={(v) =>
@@ -376,7 +382,7 @@ export default function Create() {
                             }
                           />
                           <AssetUpload
-                            label="关键成员照片"
+                            label={t("关键成员照片", "Key member photo")}
                             kind="person"
                             value={b.keyPhoto}
                             onChange={(v) => updateBand(b.id, { keyPhoto: v })}
@@ -385,21 +391,21 @@ export default function Create() {
                       </article>
                     ))}
                   </div>
-                  <h2>票务信息</h2>
+                  <h2>{t("票务信息", "Ticketing")}</h2>
                   <div className="fields two">
                     <Field
-                      label="票价"
+                      label={t("票价", "Ticket price")}
                       value={project.price}
                       onChange={(v) => set("price", v)}
                     />
                     <Field
-                      label="购票说明"
+                      label={t("购票说明", "Ticket instructions")}
                       value={project.ticketInfo}
                       onChange={(v) => set("ticketInfo", v)}
                     />
                   </div>
                   <AssetUpload
-                    label="购票二维码"
+                    label={t("购票二维码", "Ticket QR code")}
                     kind="qr"
                     value={project.assets.qr}
                     onChange={(v) =>
@@ -410,20 +416,20 @@ export default function Create() {
               )}
               {project.scene === "lecture" && (
                 <>
-                  <h2>讲座信息</h2>
+                  <h2>{t("讲座信息", "Talk information")}</h2>
                   <div className="fields two">
                     <Field
-                      label="主讲人姓名"
+                      label={t("主讲人姓名", "Speaker")}
                       value={project.speakerName}
                       onChange={(v) => set("speakerName", v)}
                     />
                     <Field
-                      label="主办单位"
+                      label={t("主办单位", "Organizer")}
                       value={project.organizer}
                       onChange={(v) => set("organizer", v)}
                     />
                     <Field
-                      label="主讲人简介"
+                      label={t("主讲人简介", "Speaker bio")}
                       type="textarea"
                       value={project.speakerBio}
                       onChange={(v) => set("speakerBio", v)}
@@ -434,16 +440,15 @@ export default function Create() {
                   )}
                   <div className="uploads two">
                     <AssetUpload
-                      label="主讲人照片"
+                      label={t("主讲人照片", "Speaker photo")}
                       kind="person"
-                      required
                       value={project.assets.speaker}
                       onChange={(v) =>
                         set("assets", { ...project.assets, speaker: v })
                       }
                     />
                     <AssetUpload
-                      label="主办方 Logo"
+                      label={t("主办方 Logo", "Organizer logo")}
                       kind="logo"
                       value={project.assets.organizerLogo}
                       onChange={(v) =>
@@ -458,10 +463,11 @@ export default function Create() {
           {step === 2 && (
             <div className="form-section">
               <p className="eyebrow">STEP 03 / VISUAL LANGUAGE</p>
-              <h1>选择主视觉方向</h1>
-              <p>风格只改变主视觉；真实文字与 Logo 仍由独立图层合成。</p>
+              <h1>{t("选择主视觉方向", "Choose a visual direction")}</h1>
+              <p>{t("风格只改变主视觉；真实文字与 Logo 仍由独立图层合成。", "Style affects the key visual only; verified copy and logos stay on deterministic layers.")}</p>
+              <p className="workflow-truth-note"><b>{t("Prompt 视觉方向", "Prompt visual direction")}</b> · {t("当前真实 GPU 生成统一使用", "Real GPU generation currently uses the")} <code>metal-gothic-v1</code> {t("工作流，预设用于构图、色彩和材质提示。", "workflow; presets guide composition, color and material prompts.")}</p>
               <button className="ai-recommend" onClick={recommend}>
-                <Sparkles /> AI 帮我推荐 <small>Mock 规则</small>
+                <Sparkles /> {t("AI 帮我推荐", "Recommend with AI")} <small>{t("Mock 规则", "Mock rule")}</small>
               </button>
               <div className="style-list">
                 {styles.map((s) => (
@@ -477,8 +483,8 @@ export default function Create() {
                     </div>
                     <div>
                       <h3>{s.name}</h3>
-                      <p>{s.tagline}</p>
-                      <small>{s.composition}</small>
+                      <p>{english ? styleEnglish[s.id]?.tagline : s.tagline}</p>
+                      <small>{english ? styleEnglish[s.id]?.composition : s.composition}</small>
                       <div className="swatches">
                         {s.colors.map((c) => (
                           <i key={c} style={{ background: c }} />
@@ -494,7 +500,7 @@ export default function Create() {
           {step === 3 && (
             <div className="form-section">
               <p className="eyebrow">STEP 04 / OUTPUT</p>
-              <h1>选择要交付的内容</h1>
+              <h1>{t("选择要交付的内容", "Choose the deliverables")}</h1>
               <PosterLanguageToggle
                 value={project.posterLanguage ?? "en"}
                 onChange={(language) => set("posterLanguage", language)}
@@ -503,10 +509,10 @@ export default function Create() {
                 <label className="selected">
                   <input type="checkbox" checked readOnly />
                   <span>
-                    <b>静态竖版海报</b>
+                    <b>{t("静态竖版海报", "Static portrait poster")}</b>
                     <small>P0 · 1024 × 1536 · PNG</small>
                   </span>
-                  <em>默认</em>
+                  <em>{t("默认", "Default")}</em>
                 </label>
                 <label className={project.outputs.teaser ? "selected" : ""}>
                   <input
@@ -520,27 +526,26 @@ export default function Create() {
                     }
                   />
                   <span>
-                    <b>5–8 秒宣传片</b>
-                    <small>P1 · 规划中 · 会增加生成时间</small>
+                    <b>{t("5–8 秒宣传片", "5–8 second teaser")}</b>
+                    <small>{t("P1 · 规划中 · 会增加生成时间", "P1 · Planned · increases generation time")}</small>
                   </span>
-                  <em>需主动选择</em>
+                  <em>{t("需主动选择", "Opt in")}</em>
                 </label>
                 <label className="disabled">
                   <input type="checkbox" disabled />
                   <span>
-                    <b>VJ 动态视觉</b>
-                    <small>P2 · 后续版本</small>
+                    <b>{t("VJ 动态视觉", "VJ motion visual")}</b>
+                    <small>{t("P2 · 后续版本", "P2 · Later release")}</small>
                   </span>
-                  <em>暂不可用</em>
+                  <em>{t("暂不可用", "Unavailable")}</em>
                 </label>
               </div>
               <div className="preflight">
                 <Check />
                 <div>
-                  <b>确定性信息图层</b>
+                  <b>{t("确定性信息图层", "Deterministic information layer")}</b>
                   <p>
-                    标题、时间、地点、Logo、二维码将使用你的原始数据合成，不由
-                    AI 重画。
+                    {t("标题、时间、地点、Logo、二维码将使用你的原始数据合成，不由 AI 重画。", "Title, time, venue, logo and QR code are composed from your verified data, never redrawn by AI.")}
                   </p>
                 </div>
               </div>
@@ -552,15 +557,15 @@ export default function Create() {
               disabled={step === 0}
               onClick={() => setStep((s) => s - 1)}
             >
-              <ArrowLeft /> 上一步
+              <ArrowLeft /> {t("上一步", "Back")}
             </button>
             {step < 3 ? (
               <button className="button" onClick={() => setStep((s) => s + 1)}>
-                继续 <ArrowRight />
+                {t("继续", "Continue")} <ArrowRight />
               </button>
             ) : (
               <button className="button" onClick={generate}>
-                提交 W7900 真实生成 <Sparkles />
+                {t("提交 W7900 真实生成", "Submit real W7900 generation")} <Sparkles />
               </button>
             )}
           </div>
@@ -569,7 +574,7 @@ export default function Create() {
           project={project}
           onApply={(draft) => {
             setProject((current) => ({ ...current, ...draft }));
-            setNotice("AI 候选信息已按你的确认写入表单；请继续检查并补充素材。");
+            setNotice(t("AI 候选信息已按你的确认写入表单；请继续检查并补充素材。", "Confirmed AI suggestions were written to the form. Review them and add optional assets."));
             setStep(1);
           }}
         />

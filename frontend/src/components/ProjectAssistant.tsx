@@ -14,7 +14,9 @@ import {
 } from '../services/aiSessionApi';
 import AssetUpload from './AssetUpload';
 import PosterLanguageToggle from './PosterLanguageToggle';
+import PublishPoster from './PublishPoster';
 import {formatPosterLocation, localizedPosterCopy} from '../utils/posterLanguage';
+import {useSiteLanguage} from '../hooks/useSiteLanguage';
 
 export type ProjectDraft = Partial<Omit<PosterProject, 'bands'>> & {bands?: Participant[]};
 
@@ -32,7 +34,7 @@ async function renderPublishPng(node: HTMLElement): Promise<string> {
   const width = Math.max(node.getBoundingClientRect().width, 1);
   const source = await toPng(node, {
     pixelRatio: Math.max(2, 1024 / width),
-    cacheBust: true,
+    cacheBust: false,
   });
 
   return new Promise((resolve, reject) => {
@@ -58,7 +60,7 @@ async function renderPublishPng(node: HTMLElement): Promise<string> {
 
 function briefToDraft(session: AISession, project: PosterProject): ProjectDraft {
   const {event, visual} = session.brief;
-  const names = (event.artist ?? '').split(/\s*(?:&|×|x|、|,|，| and )\s*/i).filter(Boolean);
+  const names = (event.artist ?? '').split(/\s*(?:&|×|x|\/|、|,|，| and )\s*/i).filter(Boolean);
   return {
     scene: project.scene ?? 'concert',
     title: event.title || project.title,
@@ -68,8 +70,15 @@ function briefToDraft(session: AISession, project: PosterProject): ProjectDraft 
     venue: event.venue || project.venue,
     price: event.presalePrice || event.doorPrice || '',
     ticketInfo: '',
-    bands: names.length ? names.map((name) => project.bands.find((band) => band.name === name) ?? {
-      id: crypto.randomUUID(), name, genre: visual.musicGenre ?? '',
+    bands: names.length ? names.map((name, index) => {
+      const normalized = name.toLocaleLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+      const existing = project.bands.find((band) => {
+        const candidates = [band.name, band.nameEn].filter(Boolean).map((value) => value!.toLocaleLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, ''));
+        return candidates.some((candidate) => candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate));
+      }) ?? project.bands[index];
+      return existing ? {...existing, name, genre: existing.genre || visual.musicGenre || ''} : {
+        id: crypto.randomUUID(), name, genre: visual.musicGenre ?? '',
+      };
     }) : project.bands,
   };
 }
@@ -132,7 +141,9 @@ function projectToSessionBrief(project: PosterProject, referenceAssetId?: string
       artistLogoAssetId: undefined,
     },
     visual: {
-      style: project.styleId,
+      // The deployed GPU workflow currently exposes one real style key.
+      // UI presets remain prompt directions and must not be sent as model IDs.
+      style: 'metal-gothic-v1',
       theme: project.theme,
       musicGenre: project.bands.map((band) => band.genre).filter(Boolean).join(' / '),
       mood: project.theme ? [project.theme] : undefined,
@@ -181,6 +192,8 @@ export default function ProjectAssistant({project, onApply}: {
   project: PosterProject;
   onApply: (draft: ProjectDraft) => void;
 }) {
+  const {english} = useSiteLanguage();
+  const t = (zh: string, en: string) => english ? en : zh;
   const navigate = useNavigate();
   const {saveTask} = useStore();
   const storageKey = `poster-ai-session:${project.id}`;
@@ -233,6 +246,9 @@ export default function ProjectAssistant({project, onApply}: {
       remoteStatus: session.status,
       candidates: poster.candidates,
       selectedCandidateId: poster.selectedCandidateId,
+      composerTemplate: session.plans?.find((plan) => plan.selected || plan.planId === session.selectedPlanId)?.plan.composerTemplate,
+      palette: poster.candidates.find((candidate) => candidate.selected || candidate.candidateId === poster.selectedCandidateId)?.spec?.palette
+        ?? session.plans?.find((plan) => plan.selected || plan.planId === session.selectedPlanId)?.plan.palette,
       elapsedSeconds: poster.progress.elapsedSeconds,
       etaSeconds: poster.progress.etaSeconds,
       outputUrl: absoluteAIImageUrl(poster.resultUrl),
@@ -280,8 +296,34 @@ export default function ProjectAssistant({project, onApply}: {
       localStorage.setItem(storageKey, next.sessionId);
       return next;
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'AI 服务暂时不可用');
+      const message = reason instanceof Error ? reason.message : 'AI 服务暂时不可用';
+      setError(/failed to fetch|networkerror|load failed/i.test(message)
+        ? '生成服务连接中断，Session 与已上传素材仍然保留。请稍后安全重试，无需重新填写。'
+        : message);
       return null;
+    } finally { setBusy(false); }
+  };
+
+  const finalizeAndFollowReview = async () => {
+    if (!session) return;
+    setBusy(true); setError('');
+    try {
+      let next = await aiSessionApi.finalize(session.sessionId);
+      setSession(next);
+      // Final review can continue after the POST has returned. Follow the
+      // authoritative session until finalize disappears from availableActions.
+      for (let attempt = 0; attempt < 48; attempt += 1) {
+        if (!next.availableActions.includes('finalize')
+          && ['succeeded', 'completed_with_warnings', 'failed', 'canceled', 'cancelled'].includes(next.status)) break;
+        await new Promise((resolve) => window.setTimeout(resolve, 2500));
+        next = await aiSessionApi.get(next.sessionId);
+        setSession(next);
+      }
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : '视觉审查暂时不可用';
+      setError(/failed to fetch|networkerror|load failed/i.test(message)
+        ? '视觉审查连接中断，当前最佳版本已保留。请安全重试审查。'
+        : message);
     } finally { setBusy(false); }
   };
 
@@ -388,6 +430,16 @@ export default function ProjectAssistant({project, onApply}: {
     inputRef.current?.focus();
   };
 
+  const selectCandidateSafely = async (candidateId: string) => {
+    if (!session) throw new Error('AI Session 尚未建立。');
+    const fresh = await aiSessionApi.get(session.sessionId);
+    setSession(fresh);
+    if (!fresh.availableActions.includes('select_candidate')) {
+      throw new Error('候选图仍在校验中，已同步最新状态，请稍后再选择。');
+    }
+    return aiSessionApi.selectCandidate(fresh.sessionId, candidateId);
+  };
+
   const reset = () => {
     localStorage.removeItem(storageKey);
     setSession(null); setError(''); setInput(''); setImageErrors({}); setBoundAssetCount(0);
@@ -397,6 +449,7 @@ export default function ProjectAssistant({project, onApply}: {
   const posterCopy = localizedPosterCopy(project);
   const selectedCandidate = candidates.find((candidate) => candidate.selected)
     ?? candidates.find((candidate) => candidate.candidateId === session?.poster?.selectedCandidateId);
+  const selectedPlan = session?.plans?.find((plan) => plan.selected || plan.planId === session.selectedPlanId);
   const selectedVisualUrl = absoluteAIImageUrl(selectedCandidate?.imageUrl);
   const assetBindings = projectAssetBindings(project);
   const usageEvidence = session?.assetUsages?.length
@@ -487,33 +540,33 @@ export default function ProjectAssistant({project, onApply}: {
 
   return <aside className="assistant-panel assistant-live" id="project-assistant">
     <header className="assistant-head">
-      <div><span><Bot size={16}/> AI CREATIVE AGENT</span><b>与 AI 一起完成海报</b></div>
+      <div><span><Bot size={16}/> AI CREATIVE AGENT</span><b>{t('与 AI 一起完成海报', 'Build the poster with AI')}</b></div>
       <em>LIVE API</em>
     </header>
     <div className="assistant-context">
-      <Sparkles size={14}/><span>{session ? session.status : '等待开始'}</span>
+      <Sparkles size={14}/><span>{session ? session.status : t('等待开始', 'Ready to start')}</span>
       <b>{readiness}% READY</b>
     </div>
     {session && <div className="assistant-telemetry" aria-label="生成运行状态">
-      <div><small>GPU</small><b>{session.metrics?.gpu ?? backendHealth?.gpu?.model ?? 'AMD GPU 节点'}</b></div>
-      <div><small>ROCm</small><b>{session.metrics?.rocm ?? '后端未透出'}</b></div>
-      <div><small>WORKFLOW</small><b>{backendHealth?.comfyui?.workflowVersion ?? '实时读取中'}</b></div>
-      <div><small>阶段</small><b>{session.generationStages?.find((stage) => stage.status === 'running')?.label ?? session.status}</b></div>
-      <div><small>进度</small><b>{session.poster ? `${session.poster.progress.completed}/${session.poster.progress.total}` : '等待任务'}</b></div>
+      <div><small>GPU</small><b>{session.metrics?.gpu ?? backendHealth?.gpu?.model ?? t('AMD GPU 节点', 'AMD GPU node')}</b></div>
+      <div><small>ROCm</small><b>{session.metrics?.rocm ?? t('后端未透出', 'Not provided')}</b></div>
+      <div><small>WORKFLOW</small><b>{backendHealth?.comfyui?.workflowVersion ?? t('实时读取中', 'Loading live')}</b></div>
+      <div><small>{t('阶段', 'STAGE')}</small><b>{session.generationStages?.find((stage) => stage.status === 'running')?.label ?? session.status}</b></div>
+      <div><small>{t('进度', 'PROGRESS')}</small><b>{session.poster ? `${session.poster.progress.completed}/${session.poster.progress.total}` : t('等待任务', 'Waiting')}</b></div>
     </div>}
     {backendDependencies?.capabilities && <details className="assistant-capabilities">
       <summary>
-        <span>生成能力检查</span>
-        <small>{backendDependencies.status === 'healthy' ? '后端在线' : backendDependencies.status}</small>
+        <span>{t('生成能力检查', 'Capability check')}</span>
+        <small>{backendDependencies.status === 'healthy' ? t('后端在线', 'Backend online') : backendDependencies.status}</small>
       </summary>
       <div>
         {([
-          ['负向提示词', backendDependencies.capabilities.negativePrompt],
-          ['人物 / Logo 抠图', backendDependencies.capabilities.backgroundRemoval],
-          ['人物相似度', backendDependencies.capabilities.personSimilarityMetric],
-          ['参考图条件化', backendDependencies.capabilities.referenceImageConditioning],
+          [t('负向提示词', 'Negative prompt'), backendDependencies.capabilities.negativePrompt],
+          [t('人物 / Logo 抠图', 'People / logo cutout'), backendDependencies.capabilities.backgroundRemoval],
+          [t('人物相似度', 'Identity similarity'), backendDependencies.capabilities.personSimilarityMetric],
+          [t('参考图条件化', 'Reference conditioning'), backendDependencies.capabilities.referenceImageConditioning],
         ] as const).map(([label, capability]) => capability && <p key={label}>
-          <b className={capability.available ? 'ok' : 'muted'}>{capability.available ? '可用' : '未接入'}</b>
+          <b className={capability.available ? 'ok' : 'muted'}>{capability.available ? t('可用', 'Available') : t('未接入', 'Unavailable')}</b>
           <span>{label}</span>
           {!capability.available && capability.reason && <small title={capability.reason}>{capability.reason}</small>}
         </p>)}
@@ -521,48 +574,48 @@ export default function ProjectAssistant({project, onApply}: {
     </details>}
 
     <div className="assistant-messages" ref={messagesRef} aria-live="polite">
-      {!session?.messages.length && <div className="assistant-message assistant"><i><Bot/></i><p>告诉我演出、活动或品牌故事。我会逐步追问，并由后端 AI 生成可确认的设计方案。</p></div>}
+      {!session?.messages.length && <div className="assistant-message assistant"><i><Bot/></i><p>{t('告诉我演出、活动或品牌故事。我会逐步追问，并由后端 AI 生成可确认的设计方案。', 'Tell me about the performance, event or brand story. I will ask for missing facts and produce confirmable design plans.')}</p></div>}
       {session?.messages.map((message) => <div key={message.messageId} className={`assistant-message ${message.role}`}>
         <i>{message.role === 'user' ? <UserRound/> : <Bot/>}</i><p>{message.content}</p>
       </div>)}
-      {pendingMessage && !session?.messages.some((message) => message.role === 'user' && message.content === pendingMessage) && <div className="assistant-message user pending"><i><UserRound/></i><p>{pendingMessage}<small>正在送达 AI…</small></p></div>}
+      {pendingMessage && !session?.messages.some((message) => message.role === 'user' && message.content === pendingMessage) && <div className="assistant-message user pending"><i><UserRound/></i><p>{pendingMessage}<small>{t('正在送达 AI…', 'Sending to AI…')}</small></p></div>}
       {busy && <div className="assistant-message assistant"><i><Bot/></i><p className="assistant-typing"><span/><span/><span/></p></div>}
     </div>
 
-    {error && <div className="assistant-error"><b>连接或生成失败</b><span>{error}</span><button onClick={() => setError('')}>关闭</button></div>}
+    {error && <div className="assistant-error"><b>{t('连接或生成失败', 'Connection or generation failed')}</b><span>{error}</span><button onClick={() => setError('')}>{t('关闭', 'Close')}</button></div>}
 
     {!!session?.missingFields?.length && <section className="assistant-missing">
-      <header><b>还需要补充</b><span>{session.missingFields.length} 项</span></header>
+      <header><b>{t('还需要补充', 'Still needed')}</b><span>{session.missingFields.length} {t('项', 'items')}</span></header>
       <div>{session.missingFields.map((field) => <span key={field}>{fieldLabels[field] ?? field}</span>)}</div>
     </section>}
 
     {!!usageEvidence.length && <section className="assistant-asset-status">
-      <header><b>素材处理与使用证据</b><span>{usageEvidence.filter((item) => item.used).length} 项已使用</span></header>
+      <header><b>{t('素材处理与使用证据', 'Asset processing & usage evidence')}</b><span>{usageEvidence.filter((item) => item.used).length} {t('项已使用', 'used')}</span></header>
       {usageEvidence.map((item) => <div key={`${item.assetId}-${item.purpose}`} title={item.message}><span>{item.purpose}</span><b className={item.used ? 'ok' : 'muted'}>{item.used ? `已用于 ${item.stage ?? '生成'}` : item.message ?? (generationHasOutput ? '已绑定 · 条件化未启用' : '已绑定 · 等待生成')}</b></div>)}
     </section>}
     {hasUnusedBoundAssets && <div className="assistant-error" role="alert">
-      <b>真实素材尚未参与本次生成</b>
-      <span>后端已接收素材，但没有返回任何实际使用证据。当前候选图不能视为人物保持或风格参考已生效。</span>
+      <b>{t('真实素材尚未参与本次生成', 'Real assets were not used in this generation')}</b>
+      <span>{t('后端已接收素材，但没有返回任何实际使用证据。当前候选图不能视为人物保持或风格参考已生效。', 'The backend received the assets but returned no usage evidence. Identity preservation or reference conditioning cannot be claimed for these candidates.')}</span>
     </div>}
 
-    {session && <button className="assistant-sync" onClick={applyBrief}><Check/> 将 AI 已理解的信息同步到表单</button>}
+    {session && <button className="assistant-sync" onClick={applyBrief}><Check/> {t('将 AI 已理解的信息同步到表单', 'Sync confirmed AI facts to form')}</button>}
     {canAttach && assetBindings.length > 0 && <button className="assistant-assets" disabled={busy} onClick={() => void uploadAndBindAssets()}>
       {boundAssetCount ? <Check/> : <Sparkles/>} {boundAssetCount ? `已绑定 ${boundAssetCount} 项真实素材` : `上传并绑定 ${assetBindings.length} 项真实素材`}
     </button>}
     {uploadProgress && <div className="assistant-upload-progress" role="status"><LoaderCircle/> {uploadProgress}<small>后端正在校验和预处理，可能需要几十秒</small></div>}
 
     {actions.includes('confirm_plan') && !!session?.plans?.length && <section className="assistant-plans">
-      <header><b>选择一个设计方向</b><span>{session.plans.length} 个真实方案</span></header>
-      {!publishFactsConfirmed && <p className="assistant-plan-gate" role="status">先点击“将 AI 已理解的信息同步到表单”，确认标题、时间和地点后再生成。</p>}
+      <header><b>{t('选择一个设计方向', 'Choose a design direction')}</b><span>{session.plans.length} {t('个真实方案', 'real plans')}</span></header>
+      {!publishFactsConfirmed && <p className="assistant-plan-gate" role="status">{t('先点击“将 AI 已理解的信息同步到表单”，确认标题、时间和地点后再生成。', 'Sync the AI brief to the form and confirm title, date and venue before generation.')}</p>}
       {session.plans.map(({planId, plan}) => <article key={planId}>
         <div className="plan-palette">{plan.palette.map((color) => <i key={color} style={{background: color}}/>)}</div>
         <b>{plan.name}</b><p>{plan.concept}</p><small>{plan.composerTemplate} · {plan.composition.symmetry}</small>
-        <button disabled={busy || !publishFactsConfirmed} onClick={() => run(() => aiSessionApi.confirmPlan(session.sessionId, planId))}>{publishFactsConfirmed ? '确认此方案' : '请先确认活动信息'}</button>
+        <button disabled={busy || !publishFactsConfirmed} onClick={() => run(() => aiSessionApi.confirmPlan(session.sessionId, planId))}>{publishFactsConfirmed ? t('确认此方案', 'Confirm this plan') : t('请先确认活动信息', 'Confirm event facts first')}</button>
       </article>)}
     </section>}
 
     {session?.poster && <section className="assistant-generation">
-      <header><b>候选视觉</b><span>{session.poster.progress.percent != null ? `${session.poster.progress.percent}%` : `${session.poster.progress.completed} / ${session.poster.progress.total}`}</span></header>
+      <header><b>{t('候选视觉', 'Candidate visuals')}</b><span>{session.poster.progress.percent != null ? `${session.poster.progress.percent}%` : `${session.poster.progress.completed} / ${session.poster.progress.total}`}</span></header>
       <div className="assistant-pipeline-progress" aria-label="生成总进度">
         <i style={{width: `${session.poster.progress.percent ?? (session.poster.progress.completed / Math.max(1, session.poster.progress.total) * 65)}%`}}/>
       </div>
@@ -571,9 +624,10 @@ export default function ProjectAssistant({project, onApply}: {
         <span>{session.poster.progress.elapsedSeconds != null ? `已用 ${session.poster.progress.elapsedSeconds}s` : ''}</span>
         <span>{session.poster.progress.etaSeconds != null ? `预计剩余 ${session.poster.progress.etaSeconds}s` : ''}</span>
       </div>
-      {shouldPoll && <div className="generation-live"><LoaderCircle/> AMD GPU 正在生成候选图，页面会自动刷新</div>}
+      {shouldPoll && <div className="generation-live"><LoaderCircle/> {t('AMD GPU 正在生成候选图，页面会自动刷新', 'AMD GPU is generating candidates; this page refreshes automatically')}</div>}
       <div className="candidate-grid">{candidates.map((candidate) => {
         const imageUrl = absoluteAIImageUrl(candidate.imageUrl);
+        const visualAnalysis = candidate.visualAnalysis ?? candidate.spec?.visualAnalysis;
         return <article key={candidate.candidateId} className={candidate.selected ? 'selected' : ''}>
           {imageUrl && !imageErrors[candidate.candidateId]
             ? <button className="candidate-image-button" type="button" onClick={() => setLightbox({src: imageUrl, alt: candidate.variantName})} aria-label={`放大查看 ${candidate.variantName}`}><img src={imageUrl} alt={candidate.variantName} onError={() => setImageErrors((current) => ({...current, [candidate.candidateId]: true}))}/><Maximize2/></button>
@@ -584,46 +638,40 @@ export default function ProjectAssistant({project, onApply}: {
             {candidate.spec.camera && <small>{candidate.spec.camera}</small>}
             {!!candidate.spec.palette?.length && <div>{candidate.spec.palette.map((color) => <i key={color} style={{background: color}} title={color}/>)}</div>}
           </details>}
-          {actions.includes('select_candidate') && candidate.status === 'ready' && <button disabled={busy} onClick={() => run(() => aiSessionApi.selectCandidate(session.sessionId, candidate.candidateId))}>选择这张</button>}
-          {candidate.status === 'failed' && session.poster && <button disabled={busy} onClick={() => run(() => aiSessionApi.retryCandidate(session.sessionId, session.poster!.posterId, candidate.candidateId))}>仅重试这张</button>}
+          {visualAnalysis && <div className="candidate-analysis" aria-label="背景与排版分析">
+            <span className={visualAnalysis.hasGeneratedText === false ? 'ok' : 'warning'}>{visualAnalysis.hasGeneratedText === false ? '无模型文字' : '检测到文字'}</span>
+            <span>{visualAnalysis.textSafeZones?.length ?? 0} 个安全区</span>
+            <span>{visualAnalysis.subjectBounds?.length ?? 0} 个主体区域</span>
+          </div>}
+          {actions.includes('select_candidate') && candidate.status === 'ready' && <button disabled={busy} onClick={() => run(() => selectCandidateSafely(candidate.candidateId))}>{t('选择这张', 'Select')}</button>}
+          {candidate.status === 'failed' && session.poster && <button disabled={busy} onClick={() => run(() => aiSessionApi.retryCandidate(session.sessionId, session.poster!.posterId, candidate.candidateId))}>{t('仅重试这张', 'Retry this candidate')}</button>}
         </article>;
       })}</div>
       {!!session.generationStages?.length && <div className="assistant-stage-trace">{session.generationStages.map((stage) => <div key={stage.id ?? stage.key ?? stage.label} className={stage.status}><span>{stage.label}</span><b>{stage.progress ?? (stage.status === 'completed' ? 100 : 0)}%</b>{stage.etaSeconds != null && <small>约 {stage.etaSeconds}s</small>}</div>)}</div>}
     </section>}
 
-    {actions.includes('finalize') && session && <button className="button assistant-finalize" disabled={busy} onClick={() => run(() => aiSessionApi.finalize(session.sessionId))}><RefreshCw/> 启动 AI 视觉审查与优化</button>}
-    {session && actions.includes('cancel') && <button className="ghost-button assistant-cancel" disabled={busy} onClick={() => run(() => aiSessionApi.cancel(session.sessionId))}>取消当前生成</button>}
+    {actions.includes('finalize') && session && <button className="button assistant-finalize" disabled={busy} onClick={() => void finalizeAndFollowReview()}><RefreshCw/> {t('启动 AI 视觉审查与优化', 'Run AI visual review & optimization')}</button>}
+    {session && actions.includes('cancel') && <button className="ghost-button assistant-cancel" disabled={busy} onClick={() => run(() => aiSessionApi.cancel(session.sessionId))}>{t('取消当前生成', 'Cancel generation')}</button>}
     {session?.reviewSummary?.warning && actions.includes('finalize') && <button className="ghost-button assistant-retry" disabled={busy} onClick={() => run(() => aiSessionApi.retryFinalize(session.sessionId))}><RefreshCw/> 安全重试审查</button>}
     {finalUrl && <section className="assistant-final">
-      <header><b>发布版海报</b><span>真实信息程序化叠加</span></header>
+      <header><b>{t('发布版海报', 'Publish-ready poster')}</b><span>{t('真实信息程序化叠加', 'Verified facts composed programmatically')}</span></header>
       <PosterLanguageToggle value={posterCopy.language} onChange={(language) => onApply({posterLanguage: language})}/>
-      {selectedVisualUrl && <div className="session-publish-poster" ref={publishRef}>
-        <img className="session-publish-visual" src={selectedVisualUrl} alt="选中的 AI 主视觉"/>
-        <div className="session-publish-shade"/>
-        <div className="session-publish-copy">
-          <small>POSTER VISUAL LAB · AI KEY VISUAL</small>
-          <h2>{posterCopy.title || session?.brief.event.title}</h2>
-          <p>{posterCopy.theme || session?.brief.visual.theme}</p>
-          <div className="session-publish-bands">{posterCopy.bands.map((band) => <span key={band.id}>{band.logo?.dataUrl ? <img src={band.logo.dataUrl} alt={`${band.displayName} Logo`}/> : <b>{band.displayName}</b>}</span>)}</div>
-          <dl><div><dt>{posterCopy.labels.date}</dt><dd>{project.dateTime || `${session?.brief.event.date ?? ''} ${session?.brief.event.time ?? ''}`}</dd></div><div><dt>{posterCopy.labels.venue}</dt><dd>{formatPosterLocation(posterCopy.city, posterCopy.venue) || session?.brief.event.venue}</dd></div>{project.price && <div><dt>{posterCopy.labels.ticket}</dt><dd>{project.price}</dd></div>}</dl>
-          {project.assets.qr?.dataUrl && <img className="session-publish-qr" src={project.assets.qr.dataUrl} alt="购票二维码"/>}
-        </div>
-      </div>}
-      {selectedVisualUrl && <button className="button assistant-publish-download" disabled={busy} onClick={() => void downloadPublishedPoster()}><Download/> 导出精确信息发布版</button>}
-      {selectedVisualUrl && <button className="ghost-button assistant-publish-preview" disabled={busy} onClick={() => void previewPublishedPoster()}><Maximize2/> 放大查看最终发布版</button>}
-      {selectedVisualUrl && session?.poster && ['succeeded', 'completed_with_warnings'].includes(session.status) && <button className="ghost-button assistant-quality-link" onClick={() => navigate(`/result/${encodeURIComponent(project.id)}`)}><CheckCircle2/> 查看完整质量与性能报告</button>}
+      {selectedVisualUrl && <PublishPoster project={project} visualUrl={selectedVisualUrl} nodeRef={publishRef} palette={selectedCandidate?.spec?.palette ?? selectedPlan?.plan.palette} template={selectedPlan?.plan.composerTemplate} analysis={selectedCandidate?.visualAnalysis ?? selectedCandidate?.spec?.visualAnalysis}/>}
+      {selectedVisualUrl && <button className="button assistant-publish-download" disabled={busy} onClick={() => void downloadPublishedPoster()}><Download/> {t('导出精确信息发布版', 'Export publish-ready PNG')}</button>}
+      {selectedVisualUrl && <button className="ghost-button assistant-publish-preview" disabled={busy} onClick={() => void previewPublishedPoster()}><Maximize2/> {t('放大查看最终发布版', 'Open final poster')}</button>}
+      {selectedVisualUrl && session?.poster && ['succeeded', 'completed_with_warnings'].includes(session.status) && <button className="ghost-button assistant-quality-link" onClick={() => navigate(`/result/${encodeURIComponent(project.id)}`)}><CheckCircle2/> {t('查看完整质量与性能报告', 'Open quality & performance report')}</button>}
       {session?.reviewSummary?.warning && <p className="assistant-review-warning">评分 {session.reviewSummary.bestScore ?? '—'} · {session.reviewSummary.warning}</p>}
       {actions.includes('download_final') && <details><summary>查看后端原始合成结果</summary><img src={finalUrl} alt="后端合成的最终海报"/><a className="button" href={finalUrl} target="_blank" rel="noreferrer"><Download/> 下载后端结果</a></details>}
     </section>}
 
     {canMessage && <>
       <details className="assistant-upload-studio assistant-attachment-tray">
-        <summary><span>＋ 添加附件（可选）</span><small>{assetBindings.length ? `${assetBindings.length} 项素材` : '人物 / Logo / 风格参考'}</small></summary>
-        <p>所有附件均非必填。上传参考海报后，系统会自动理解它的视觉语言并安全生成新的主视觉。</p>
+        <summary><span>＋ {t('添加附件（可选）', 'Add attachments (optional)')}</span><small>{assetBindings.length ? `${assetBindings.length} ${t('项素材', 'assets')}` : t('人物 / Logo / 风格参考', 'People / logo / style reference')}</small></summary>
+        <p>{t('所有附件均非必填。上传参考海报后，系统会自动理解它的视觉语言并安全生成新的主视觉。', 'All attachments are optional. A reference poster can guide the visual language without exposing internal controls.')}</p>
         <div className="assistant-upload-grid">
-          <AssetUpload label="人物 / 乐队照片（可选）" kind="person" value={project.bands[0]?.groupPhoto} onChange={(asset) => setConversationAsset('person', asset)}/>
-          <AssetUpload label="乐队原始 Logo（可选）" kind="logo" value={project.bands[0]?.logo} onChange={(asset) => setConversationAsset('logo', asset)}/>
-          <AssetUpload label="添加参考海报（可选）" kind="reference" value={project.assets.reference} onChange={(asset) => setConversationAsset('reference', asset)}/>
+          <AssetUpload label={t('人物 / 乐队照片（可选）', 'People / band photo (optional)')} kind="person" value={project.bands[0]?.groupPhoto} onChange={(asset) => setConversationAsset('person', asset)}/>
+          <AssetUpload label={t('乐队原始 Logo（可选）', 'Original band logo (optional)')} kind="logo" value={project.bands[0]?.logo} onChange={(asset) => setConversationAsset('logo', asset)}/>
+          <AssetUpload label={t('添加参考海报（可选）', 'Reference poster (optional)')} kind="reference" value={project.assets.reference} onChange={(asset) => setConversationAsset('reference', asset)}/>
         </div>
         {project.assets.reference && backendDependencies?.capabilities?.referenceImageConditioning?.available && <div className="assistant-reference-ready"><CheckCircle2/><span>参考海报已就绪</span><small>系统将自动选择安全的参考方式</small></div>}
         {!session && assetBindings.length > 0 && <small className="assistant-asset-hint">发送第一条消息时会先上传附件，并把参考图 ID 与强度写入生成 Brief。</small>}
@@ -631,16 +679,16 @@ export default function ProjectAssistant({project, onApply}: {
         {!!assetWarnings.length && <div className="assistant-asset-warnings">{assetWarnings.map((warning) => <small key={warning}>{warning}</small>)}</div>}
       </details>
       <div className="assistant-prompts">
-        <button onClick={() => send('我要做一张地下金属演出海报。标题是长安双雄，艺人是内网穿透 NATP 与示例金属乐队，2026 年 8 月 8 日 20:00，在西安大雁塔附近演出。视觉是黑色、骨白、氧化红的手工复印拼贴，工业金属风，情绪原始、黑暗、仪式感、高能量。')}>地下金属演出</button>
-        <button onClick={() => send('我要做一张独立音乐节海报，请逐项问我还缺少什么。')}>逐步问我</button>
+        <button onClick={() => send(english ? 'Create an underground metal concert poster. Ask me for any missing facts.' : '我要做一张地下金属演出海报。标题是长安双雄，艺人是内网穿透 NATP 与示例金属乐队，2026 年 8 月 8 日 20:00，在西安大雁塔附近演出。视觉是黑色、骨白、氧化红的手工复印拼贴，工业金属风，情绪原始、黑暗、仪式感、高能量。')}>{t('地下金属演出', 'Underground metal')}</button>
+        <button onClick={() => send(english ? 'I need an independent music festival poster. Ask for the missing facts one by one.' : '我要做一张独立音乐节海报，请逐项问我还缺少什么。')}>{t('逐步问我', 'Guide me')}</button>
       </div>
       <div className="assistant-compose">
-        <textarea ref={inputRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => {if (event.key === 'Enter' && !event.shiftKey) {event.preventDefault(); void send();}}} placeholder="描述活动，或继续回答 AI 的问题……"/>
-        <button onClick={() => void send()} disabled={!input.trim() || busy} aria-label="发送消息"><Send/></button>
-        <small><CornerDownLeft/> Enter 发送 · Shift + Enter 换行</small>
+        <textarea ref={inputRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => {if (event.key === 'Enter' && !event.shiftKey) {event.preventDefault(); void send();}}} placeholder={t('描述活动，或继续回答 AI 的问题……', 'Describe the event or answer the AI…')}/>
+        <button onClick={() => void send()} disabled={!input.trim() || busy} aria-label={t('发送消息', 'Send message')}><Send/></button>
+        <small><CornerDownLeft/> {t('Enter 发送 · Shift + Enter 换行', 'Enter to send · Shift + Enter for new line')}</small>
       </div>
     </>}
-    {session && <button className="assistant-reset" onClick={reset}>开始新的 AI 会话</button>}
+    {session && <button className="assistant-reset" onClick={reset}>{t('开始新的 AI 会话', 'Start a new AI session')}</button>}
     {lightbox && <div className="poster-lightbox" role="dialog" aria-modal="true" aria-label={lightbox.alt} onClick={() => setLightbox(null)}>
       <button type="button" onClick={() => setLightbox(null)} aria-label="关闭大图"><X/></button>
       <img src={lightbox.src} alt={lightbox.alt} onClick={(event) => event.stopPropagation()}/>
