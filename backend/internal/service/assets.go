@@ -58,6 +58,12 @@ func (s *AssetService) Upload(
 		return domain.AssetResponse{}, err
 	}
 
+	// store.Save 只管落盘，不填处理状态。不显式写的话，上传响应里
+	// processStatus 和 cutout.status 都是空字符串 —— 两个都不在各自的枚举里，
+	// 前端拿到的第一份素材数据反而是无法解释的。真实状态是"已入队待处理"。
+	asset.ProcessStatus = domain.AssetProcessStatusPending
+	asset.Cutout.Status = domain.AssetCutoutStatusPending
+
 	if err := s.repository.CreateAsset(ctx, asset); err != nil {
 		_ = s.store.Delete(asset)
 		return domain.AssetResponse{}, err
@@ -80,9 +86,14 @@ func (s *AssetService) Get(
 
 func (s *AssetService) List(
 	ctx context.Context,
-	limit int,
+	page domain.Page,
 ) (domain.AssetListResponse, error) {
-	assets, err := s.repository.ListAssets(ctx, limit)
+	assets, err := s.repository.ListAssets(ctx, page)
+	if err != nil {
+		return domain.AssetListResponse{}, err
+	}
+
+	total, err := s.repository.CountAssets(ctx)
 	if err != nil {
 		return domain.AssetListResponse{}, err
 	}
@@ -99,7 +110,11 @@ func (s *AssetService) List(
 
 	return domain.AssetListResponse{
 		Items: items,
-		Count: len(items),
+		ListMeta: domain.NewListMeta(
+			page,
+			len(items),
+			total,
+		),
 	}, nil
 }
 
@@ -129,23 +144,24 @@ func assetResponse(
 	asset domain.Asset,
 ) domain.AssetResponse {
 	return domain.AssetResponse{
-		ID:           asset.ID,
-		Kind:         asset.Kind,
-		OriginalName: asset.OriginalName,
-		Filename:     asset.Filename,
-		MimeType:     asset.MimeType,
-		SizeBytes:    asset.SizeBytes,
-		SHA256:       asset.SHA256,
-		Width:        asset.Width,
-		Height:       asset.Height,
-		ContentURL:   "/api/assets/" + asset.ID + "/content",
+		ID:             asset.ID,
+		Kind:           asset.Kind,
+		OriginalName:   asset.OriginalName,
+		Filename:       asset.Filename,
+		MimeType:       asset.MimeType,
+		SizeBytes:      asset.SizeBytes,
+		SHA256:         asset.SHA256,
+		Width:          asset.Width,
+		Height:         asset.Height,
+		ContentURL:     "/api/assets/" + asset.ID + "/content",
 		ProcessStatus:  asset.ProcessStatus,
 		ProcessError:   asset.ProcessError,
 		ProcessedAt:    asset.ProcessedAt,
 		MaskPath:       asset.MaskPath,
+		Cutout:         asset.Cutout,
 		AnalysisJSON:   asset.AnalysisJSON,
 		DominantColors: asset.DominantColors,
 		ProcessVersion: asset.ProcessVersion,
-		CreatedAt:    asset.CreatedAt,
+		CreatedAt:      asset.CreatedAt,
 	}
 }

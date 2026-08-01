@@ -3,9 +3,9 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -107,8 +107,8 @@ func (s *Server) handleAIDesign(
 		domain.AIDesignResponse{
 			Result: result,
 			Metrics: domain.AIMetricsResponse{
-				LatencyMS: metrics.Latency.Milliseconds(),
-				PromptTokens: metrics.PromptTokens,
+				LatencyMS:        metrics.Latency.Milliseconds(),
+				PromptTokens:     metrics.PromptTokens,
 				CompletionTokens: metrics.CompletionTokens,
 			},
 		},
@@ -182,10 +182,10 @@ func (s *Server) handlePosterReview(
 		return
 
 	case err != nil:
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
@@ -196,10 +196,10 @@ func (s *Server) handlePosterReview(
 		[]byte(material.Poster.EventJSON),
 		&event,
 	); err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			"decode persisted event brief: "+err.Error(),
+			request,
+			fmt.Errorf("decode persisted event brief: %w", err),
 		)
 		return
 	}
@@ -210,10 +210,10 @@ func (s *Server) handlePosterReview(
 		[]byte(material.Poster.VisualJSON),
 		&visual,
 	); err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			"decode persisted visual brief: "+err.Error(),
+			request,
+			fmt.Errorf("decode persisted visual brief: %w", err),
 		)
 		return
 	}
@@ -250,20 +250,20 @@ func (s *Server) handlePosterReview(
 		posterID,
 	)
 	if err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
 
 	reviewID, err := domain.NewID("review_")
 	if err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
@@ -298,10 +298,10 @@ func (s *Server) handlePosterReview(
 		ctx,
 		review,
 	); err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
@@ -320,20 +320,9 @@ func (s *Server) handlePosterReviews(
 	request *http.Request,
 	posterID string,
 ) {
-	limit := 20
-
-	if raw := request.URL.Query().Get("limit"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil {
-			writeError(
-				writer,
-				http.StatusBadRequest,
-				"invalid limit",
-			)
-			return
-		}
-
-		limit = parsed
+	page, ok := parsePage(writer, request)
+	if !ok {
+		return
 	}
 
 	ctx, cancel := contextWithTimeout(
@@ -342,10 +331,10 @@ func (s *Server) handlePosterReviews(
 	)
 	defer cancel()
 
-	reviews, err := s.posterFlow.ListReviews(
+	reviews, total, err := s.posterFlow.ListReviews(
 		ctx,
 		posterID,
-		limit,
+		page,
 	)
 
 	if errors.Is(err, repository.ErrNotFound) {
@@ -358,10 +347,10 @@ func (s *Server) handlePosterReviews(
 	}
 
 	if err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
@@ -371,7 +360,13 @@ func (s *Server) handlePosterReviews(
 		http.StatusOK,
 		domain.PosterReviewListResponse{
 			PosterID: posterID,
+			Items:    reviews,
 			Reviews:  reviews,
+			ListMeta: domain.NewListMeta(
+				page,
+				len(reviews),
+				total,
+			),
 		},
 	)
 }
@@ -402,24 +397,41 @@ func (s *Server) handlePosterTimeline(
 	}
 
 	if err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
 
-	reviews, err := s.posterFlow.ListReviews(
+	reviews, _, err := s.posterFlow.ListReviews(
 		ctx,
 		posterID,
-		100,
+		domain.NormalizePage(
+			domain.MaxPageLimit,
+			0,
+		),
 	)
 	if err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
+		)
+		return
+	}
+
+	// 任务级成本汇总。每轮的 token 和耗时一直在写库，之前没有任何地方加总。
+	metrics, err := s.posterFlow.Metrics(
+		ctx,
+		posterID,
+	)
+	if err != nil {
+		writeInternalError(
+			writer,
+			request,
+			err,
 		)
 		return
 	}
@@ -431,6 +443,7 @@ func (s *Server) handlePosterTimeline(
 			"posterId": posterID,
 			"poster":   posterResult,
 			"reviews":  reviews,
+			"metrics":  metrics,
 		},
 	)
 }
@@ -518,12 +531,94 @@ func (s *Server) handleDependencies(
 			"status": overall,
 			"dependencies": map[string]any{
 				"database": database,
-				"comfyui": comfy,
-				"vlm":     vlm,
+				"comfyui":  comfy,
+				"vlm":      vlm,
 			},
+			"capabilities":  s.capabilities(),
 			"tokenRequired": s.apiToken != "",
 		},
 	)
+}
+
+// capabilities 如实报告哪些能力真的接通了。
+//
+// 之前无从判断：素材上传成功、字段返回了、actuallyUsed 是 false，但看不出这是
+// "这次没用上"还是"整条链路根本不存在"。前端据此决定要不要显示对应入口，
+// 而不是靠猜。
+func (s *Server) capabilities() map[string]any {
+	negative := map[string]any{
+		"available": false,
+		"reason": "no negative text node bound, " +
+			"or sampler cfg is 1",
+	}
+
+	if s.service != nil {
+		if effective, cfg, node := s.service.NegativePromptState(); effective {
+			negative = map[string]any{
+				"available": true,
+				"node":      node,
+				"cfg":       cfg,
+			}
+		} else {
+			negative["cfg"] = cfg
+		}
+	}
+
+	// 参考图条件化：装了 Z-Image ControlNet 权重时，参考图经 Canny 边缘图
+	// 真的进入采样；没装则退回到只影响需求理解那次 VLM 调用。
+	reference := map[string]any{
+		"available": false,
+		"influences": []string{
+			"brief_understanding",
+		},
+		"reason": "no Z-Image ControlNet patch configured; " +
+			"set REFERENCE_CONTROL_PATCH",
+	}
+
+	if s.service != nil {
+		if available, patch := s.service.ReferenceControlState(); available {
+			reference = map[string]any{
+				"available": true,
+				"influences": []string{
+					"brief_understanding",
+					"diffusion_structure",
+				},
+				"controlMode": "canny",
+				"patch":       patch,
+				"strength": map[string]any{
+					"default": domain.DefaultReferenceControlStrength,
+					"min":     domain.MinReferenceControlStrength,
+					"max":     domain.MaxReferenceControlStrength,
+				},
+			}
+		}
+	}
+
+	return map[string]any{
+		"negativePrompt":             negative,
+		"referenceImageConditioning": reference,
+
+		// 背景去除：RMBG-1.4 的权重已经放在 models/rmbg 下，但没有接推理路径
+		// （需要 Python 边车 + Go 调用）。合成器只按素材自带的 alpha 叠加，
+		// 不会自己抠背景。
+		//
+		// reason 要说清是"权重没有"还是"没接线" —— 这两件事的下一步完全不同。
+		"backgroundRemoval": map[string]any{
+			"available": false,
+			"reason": "RMBG-1.4 weights are staged at models/rmbg " +
+				"but no inference path is wired; " +
+				"upload transparent PNG assets",
+		},
+
+		// 人物相似度：CLIP ViT-B/32 的权重也已就位，同样没接推理路径。
+		// 注意即便接上也只能"度量"相似度 —— Z-Image 没有 IPAdapter，
+		// 控制不了它。
+		"personSimilarityMetric": map[string]any{
+			"available": false,
+			"reason": "CLIP ViT-B/32 weights are staged at " +
+				"models/clip-vit-b32 but no inference path is wired",
+		},
+	}
 }
 
 func (s *Server) aiReady() bool {

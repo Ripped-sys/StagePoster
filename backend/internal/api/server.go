@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +16,7 @@ import (
 	posterflow "github.com/Ripped-sys/StagePoster/backend/internal/poster"
 	"github.com/Ripped-sys/StagePoster/backend/internal/repository"
 	"github.com/Ripped-sys/StagePoster/backend/internal/service"
+	"github.com/Ripped-sys/StagePoster/backend/internal/storage"
 )
 
 type Server struct {
@@ -31,9 +32,9 @@ type Server struct {
 	aiURL     string
 	aiModel   string
 
-	apiToken       string
-	corsOrigin     string
-	assetProcessor *service.AssetProcessor
+	apiToken        string
+	corsOrigin      string
+	assetProcessor  *service.AssetProcessor
 	healthCollector *service.HealthCollector
 }
 
@@ -186,6 +187,28 @@ func (s *Server) handleGenerate(
 		return
 	}
 
+	// 参考图素材不存在是调用方的问题，不是上游故障 —— 以前落到下面的
+	// 兜底分支返回 502，看起来像 ComfyUI 挂了。
+	if errors.Is(err, repository.ErrNotFound) {
+		writeError(
+			writer,
+			http.StatusNotFound,
+			"reference asset not found",
+		)
+		return
+	}
+
+	// 这套部署没装 ControlNet 权重却收到参考图：明确拒绝，不要静默丢掉参考图
+	// 然后返回一张跟它无关的图。
+	if errors.Is(err, service.ErrReferenceControlUnavailable) {
+		writeError(
+			writer,
+			http.StatusConflict,
+			err.Error(),
+		)
+		return
+	}
+
 	if err != nil {
 		writeError(writer, http.StatusBadGateway, err.Error())
 		return
@@ -203,24 +226,17 @@ func (s *Server) handleJobList(
 		return
 	}
 
-	limit := 20
-
-	if rawLimit := request.URL.Query().Get("limit"); rawLimit != "" {
-		parsedLimit, err := strconv.Atoi(rawLimit)
-		if err != nil {
-			writeError(writer, http.StatusBadRequest, "invalid limit")
-			return
-		}
-
-		limit = parsedLimit
+	page, ok := parsePage(writer, request)
+	if !ok {
+		return
 	}
 
 	ctx, cancel := contextWithTimeout(request, 20*time.Second)
 	defer cancel()
 
-	result, err := s.service.ListJobs(ctx, limit)
+	result, err := s.service.ListJobs(ctx, page)
 	if err != nil {
-		writeError(writer, http.StatusInternalServerError, err.Error())
+		writeInternalError(writer, request, err)
 		return
 	}
 
@@ -303,8 +319,13 @@ func (s *Server) handleResult(
 		writeError(writer, http.StatusConflict, err.Error())
 		return
 
+	// 记录存在但文件没了，对客户端等价于不存在。
+	case errors.Is(err, storage.ErrOutputMissing):
+		writeError(writer, http.StatusNotFound, "job result not found")
+		return
+
 	case err != nil:
-		writeError(writer, http.StatusInternalServerError, err.Error())
+		writeInternalError(writer, request, err)
 		return
 	}
 
@@ -417,5 +438,27 @@ func writeError(
 		map[string]any{
 			"error": message,
 		},
+	)
+}
+
+// writeInternalError 把真实错误写日志，只给客户端一句通用说明。
+// 500 分支以前统一回显 err.Error()，而文件打开失败的错误里带着服务器绝对
+// 路径，等于把存储布局送给了任何一个调用方。
+func writeInternalError(
+	writer http.ResponseWriter,
+	request *http.Request,
+	err error,
+) {
+	log.Printf(
+		"%s %s failed: %v",
+		request.Method,
+		request.URL.Path,
+		err,
+	)
+
+	writeError(
+		writer,
+		http.StatusInternalServerError,
+		"internal server error",
 	)
 }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -183,10 +182,10 @@ func (s *Server) handleAssetUpload(
 		return
 
 	case err != nil:
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
@@ -210,20 +209,9 @@ func (s *Server) handleAssetList(
 	writer http.ResponseWriter,
 	request *http.Request,
 ) {
-	limit := 20
-
-	if rawLimit := request.URL.Query().Get("limit"); rawLimit != "" {
-		parsed, err := strconv.Atoi(rawLimit)
-		if err != nil {
-			writeError(
-				writer,
-				http.StatusBadRequest,
-				"invalid limit",
-			)
-			return
-		}
-
-		limit = parsed
+	page, ok := parsePage(writer, request)
+	if !ok {
+		return
 	}
 
 	ctx, cancel := contextWithTimeout(
@@ -232,12 +220,12 @@ func (s *Server) handleAssetList(
 	)
 	defer cancel()
 
-	result, err := s.assetService.List(ctx, limit)
+	result, err := s.assetService.List(ctx, page)
 	if err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
@@ -268,10 +256,10 @@ func (s *Server) handleAssetMetadata(
 	}
 
 	if err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
@@ -302,10 +290,10 @@ func (s *Server) handleAssetContent(
 	}
 
 	if err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
@@ -349,10 +337,10 @@ func (s *Server) handleAssetProcess(
 	}
 
 	if err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
@@ -360,22 +348,19 @@ func (s *Server) handleAssetProcess(
 	steps := make([]domain.ProcessingStep, 0)
 
 	switch result.Kind {
-	case domain.AssetKindLogo:
+	case domain.AssetKindLogo, domain.AssetKindPerson:
+		// 这两步以前都直接复用笼统的 ProcessStatus，于是一张不透明的 JPEG
+		// logo 也会显示 background_removal=completed。实际上没有接任何背景
+		// 去除模型，这一步从来没跑过。
 		steps = append(steps, domain.ProcessingStep{
 			Name:   "background_removal",
-			Status: processingStepStatus(result.ProcessStatus),
+			Status: domain.ProcessingStepStatusSkipped,
+			Error:  "no background removal model is wired; upload a transparent PNG",
 		}, domain.ProcessingStep{
-			Name:   "mask_generation",
-			Status: processingStepStatus(result.ProcessStatus),
-		})
-
-	case domain.AssetKindPerson:
-		steps = append(steps, domain.ProcessingStep{
-			Name:   "background_removal",
-			Status: processingStepStatus(result.ProcessStatus),
-		}, domain.ProcessingStep{
-			Name:   "mask_generation",
-			Status: processingStepStatus(result.ProcessStatus),
+			Name: "alpha_inspection",
+			Status: cutoutStepStatus(
+				result.Cutout.Status,
+			),
 		})
 
 	case domain.AssetKindReference:
@@ -389,15 +374,16 @@ func (s *Server) handleAssetProcess(
 	}
 
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"assetId":       result.ID,
-		"processStatus": result.ProcessStatus,
-		"processError":  result.ProcessError,
-		"processedAt":   result.ProcessedAt,
-		"maskPath":      result.MaskPath,
-		"analysisJson":  result.AnalysisJSON,
+		"assetId":        result.ID,
+		"processStatus":  result.ProcessStatus,
+		"processError":   result.ProcessError,
+		"processedAt":    result.ProcessedAt,
+		"maskPath":       result.MaskPath,
+		"cutout":         result.Cutout,
+		"analysisJson":   result.AnalysisJSON,
 		"dominantColors": result.DominantColors,
 		"processVersion": result.ProcessVersion,
-		"steps":         steps,
+		"steps":          steps,
 	})
 }
 
@@ -413,5 +399,27 @@ func processingStepStatus(
 		return domain.ProcessingStepStatusFailed
 	default:
 		return domain.ProcessingStepStatusPending
+	}
+}
+
+// cutoutStepStatus 把抠图状态映射成处理步骤状态。
+// unsupported 是 skipped 而不是 completed —— 没跑过的步骤不该显示成成功。
+func cutoutStepStatus(
+	status domain.AssetCutoutStatus,
+) domain.ProcessingStepStatus {
+	switch status {
+	case domain.AssetCutoutStatusReady,
+		domain.AssetCutoutStatusOpaque:
+		return domain.ProcessingStepStatusCompleted
+
+	case domain.AssetCutoutStatusFailed:
+		return domain.ProcessingStepStatusFailed
+
+	// 排队中和"不会跑"必须分开：pending 的素材再查一次就有结果了。
+	case domain.AssetCutoutStatusPending:
+		return domain.ProcessingStepStatusPending
+
+	default:
+		return domain.ProcessingStepStatusSkipped
 	}
 }

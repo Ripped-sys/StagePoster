@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Ripped-sys/StagePoster/backend/internal/domain"
 	"github.com/Ripped-sys/StagePoster/backend/internal/repository"
 )
 
@@ -32,7 +33,10 @@ func main() {
 	}
 	defer repositoryInstance.Close()
 
-	jobs, err := repositoryInstance.ListJobs(ctx, 5)
+	jobs, err := repositoryInstance.ListJobs(
+		ctx,
+		domain.NormalizePage(5, 0),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}

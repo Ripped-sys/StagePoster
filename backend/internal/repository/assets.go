@@ -79,6 +79,8 @@ func (r *Repository) MigrateAssets(
 		"ALTER TABLE assets ADD COLUMN analysis_json TEXT",
 		"ALTER TABLE assets ADD COLUMN dominant_colors TEXT",
 		"ALTER TABLE assets ADD COLUMN process_version TEXT",
+		"ALTER TABLE assets ADD COLUMN cutout_status TEXT NOT NULL DEFAULT 'unsupported'",
+		"ALTER TABLE assets ADD COLUMN has_alpha INTEGER NOT NULL DEFAULT 0",
 	}
 
 	for _, stmt := range alterStatements {
@@ -91,6 +93,24 @@ func (r *Repository) MigrateAssets(
 				)
 			}
 		}
+	}
+
+	// mask_path 里存的从来不是蒙版，而是源文件的逐字节副本（连扩展名都硬编码成
+	// .png，JPEG 上传会得到一个装着 JPEG 字节的 .png）。没有任何代码消费它，
+	// 合成器根本看不到蒙版。留着这个值等于对外宣称抠图做过了。清掉。
+	// 磁盘上的旧 mask_*.png 文件不动，避免误删用户数据。
+	if _, err := r.db.ExecContext(
+		ctx,
+		`
+		UPDATE assets
+		SET mask_path = ''
+		WHERE mask_path IS NOT NULL AND mask_path != ''
+		`,
+	); err != nil {
+		return fmt.Errorf(
+			"clear placeholder mask paths: %w",
+			err,
+		)
 	}
 
 	return nil
@@ -176,6 +196,8 @@ func (r *Repository) GetAsset(
 			analysis_json,
 			dominant_colors,
 			process_version,
+			cutout_status,
+			has_alpha,
 			created_at
 		FROM assets
 		WHERE id = ?
@@ -199,13 +221,26 @@ func (r *Repository) GetAsset(
 	return asset, nil
 }
 
+// CountAssets 返回 assets 表总行数。
+func (r *Repository) CountAssets(
+	ctx context.Context,
+) (int, error) {
+	var total int
+
+	if err := r.db.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*) FROM assets`,
+	).Scan(&total); err != nil {
+		return 0, fmt.Errorf("count assets: %w", err)
+	}
+
+	return total, nil
+}
+
 func (r *Repository) ListAssets(
 	ctx context.Context,
-	limit int,
+	page domain.Page,
 ) ([]domain.Asset, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
 
 	rows, err := r.db.QueryContext(
 		ctx,
@@ -228,12 +263,15 @@ func (r *Repository) ListAssets(
 			analysis_json,
 			dominant_colors,
 			process_version,
+			cutout_status,
+			has_alpha,
 			created_at
 		FROM assets
 		ORDER BY created_at DESC
-		LIMIT ?
+		LIMIT ? OFFSET ?
 		`,
-		limit,
+		page.Limit,
+		page.Offset,
 	)
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -243,7 +281,7 @@ func (r *Repository) ListAssets(
 	}
 	defer rows.Close()
 
-	assets := make([]domain.Asset, 0, limit)
+	assets := make([]domain.Asset, 0, page.Limit)
 
 	for rows.Next() {
 		asset, err := scanAsset(rows)
@@ -275,6 +313,7 @@ func (r *Repository) UpdateAssetProcessStatus(
 	processedAt *time.Time,
 	maskPath string,
 	analysisJSON string,
+	cutout domain.AssetCutout,
 ) error {
 	result, err := r.db.ExecContext(
 		ctx,
@@ -286,7 +325,9 @@ func (r *Repository) UpdateAssetProcessStatus(
 			processed_at = ?,
 			mask_path = ?,
 			analysis_json = ?,
-			process_version = ?
+			process_version = ?,
+			cutout_status = ?,
+			has_alpha = ?
 		WHERE id = ?
 		`,
 		status,
@@ -295,6 +336,8 @@ func (r *Repository) UpdateAssetProcessStatus(
 		nullableString(maskPath),
 		nullableString(analysisJSON),
 		domain.AssetProcessVersion,
+		string(cutout.Status),
+		cutout.HasAlpha,
 		assetID,
 	)
 	if err != nil {
@@ -313,6 +356,7 @@ func scanAsset(source scanner) (domain.Asset, error) {
 	var analysisJSON sql.NullString
 	var dominantColors sql.NullString
 	var processVersion sql.NullString
+	var cutoutStatus sql.NullString
 
 	err := source.Scan(
 		&asset.ID,
@@ -332,6 +376,8 @@ func scanAsset(source scanner) (domain.Asset, error) {
 		&analysisJSON,
 		&dominantColors,
 		&processVersion,
+		&cutoutStatus,
+		&asset.Cutout.HasAlpha,
 		&createdAt,
 	)
 	if err != nil {
@@ -342,6 +388,10 @@ func scanAsset(source scanner) (domain.Asset, error) {
 	asset.MaskPath = maskPath.String
 	asset.AnalysisJSON = analysisJSON.String
 	asset.ProcessVersion = processVersion.String
+
+	asset.Cutout.Status = domain.NormalizeAssetCutoutStatus(
+		domain.AssetCutoutStatus(cutoutStatus.String),
+	)
 
 	if processedAt.Valid && processedAt.String != "" {
 		parsed, parseErr := parseTime(processedAt.String)

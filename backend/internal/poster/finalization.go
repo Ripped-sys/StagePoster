@@ -22,6 +22,7 @@ func (s *Service) RecomposeFromReview(
 	ctx context.Context,
 	posterID string,
 	result domain.ReviewResult,
+	round int,
 ) error {
 	s.reconcileMu.Lock()
 	defer s.reconcileMu.Unlock()
@@ -57,7 +58,7 @@ func (s *Service) RecomposeFromReview(
 	if err := s.composePoster(
 		ctx,
 		posterRecord,
-		reviewAdjustments(result),
+		reviewAdjustments(result, round),
 		"",
 	); err != nil {
 		return err
@@ -73,6 +74,7 @@ func (s *Service) RegenerateFromReview(
 	ctx context.Context,
 	posterID string,
 	result domain.ReviewResult,
+	round int,
 ) error {
 	posterRecord, err := s.repository.GetPoster(
 		ctx,
@@ -127,11 +129,14 @@ func (s *Service) RegenerateFromReview(
 
 	generation, err := s.core.Generate(
 		ctx,
-		domain.GenerateRequest{
-			Prompt:         prompt,
-			NegativePrompt: negativePrompt,
-			Seed:           &nextSeed,
-		},
+		applyReferenceControl(
+			domain.GenerateRequest{
+				Prompt:         prompt,
+				NegativePrompt: negativePrompt,
+				Seed:           &nextSeed,
+			},
+			visualBriefFrom(posterRecord),
+		),
 	)
 	if err != nil {
 		return fmt.Errorf(
@@ -189,7 +194,7 @@ func (s *Service) RegenerateFromReview(
 	if err := s.composePoster(
 		ctx,
 		posterRecord,
-		reviewAdjustments(result),
+		reviewAdjustments(result, round),
 		output.StoragePath,
 	); err != nil {
 		return err
@@ -420,14 +425,48 @@ func (s *Service) KeepExistingResult(
 	)
 }
 
-func reviewAdjustments(
+// 版式微调的单步步长。步长乘以轮次，所以第 2 轮的调整幅度必然大于第 1 轮。
+const (
+	reviewTitleStep = 0.02
+	reviewPanelStep = 0.02
+)
+
+// reviewAdjustments 把审查结论翻译成版式调整。
+//
+// scale 是轮次：第 1 轮传 1，第 2 轮传 2。scale=0 表示"原始合成时生效的值"，
+// 用来判断新算出的调整是否真的改变了什么。
+//
+// 原先这里对 TITLE 类问题直接 maxFloat(..., 0.055)、对 INFORMATION_PANEL 直接
+// maxFloat(..., 0.81)。问题在于这两个数**就是 cinematic_center 模板的默认值**
+// （domain.NormalizeCompositionAdjustments），所以对该模板的海报，"调整"之后
+// 重排产出的是同一张图，VLM 自然给同一个分。线上 15 组配对里 8 组 delta 恰好
+// 为 0，RECOMPOSE 的平均增益是 -0.7，而 REGENERATE 是 +4.8。
+//
+// 现在改成：先解析出模板的生效基线，再在基线上按轮次叠加步进。
+func reviewAdjustmentsAtScale(
 	result domain.ReviewResult,
+	scale float64,
 ) domain.CompositionAdjustments {
-	adjustments := domain.CompositionAdjustments{
-		Template: strings.TrimSpace(
-			result.NextInstruction.ComposerTemplate,
-		),
-	}
+
+	template := strings.TrimSpace(
+		result.NextInstruction.ComposerTemplate,
+	)
+
+	// 基线 = 该模板实际生效的值，不是零值。
+	adjustments := domain.NormalizeCompositionAdjustments(
+		domain.CompositionAdjustments{
+			Template: template,
+		},
+	)
+
+	adjustments.Template = template
+
+	// 每个类别最多计一次，避免同类问题重复叠加把版式推到边界。
+	var (
+		nudgeTitle bool
+		nudgePanel bool
+		darkPanel  bool
+	)
 
 	for _, issue := range result.Issues {
 		code := strings.ToUpper(
@@ -439,52 +478,75 @@ func reviewAdjustments(
 			code,
 			"TITLE",
 		):
-			adjustments.TitleOffsetRatio =
-				maxFloat(
-					adjustments.TitleOffsetRatio,
-					0.055,
-				)
+			nudgeTitle = true
 
 		case strings.Contains(
 			code,
 			"INFORMATION_PANEL_CONTRAST",
 		):
-			adjustments.PanelTheme = "dark"
-			adjustments.PanelTopRatio =
-				maxFloat(
-					adjustments.PanelTopRatio,
-					0.80,
-				)
+			darkPanel = true
+			nudgePanel = true
 
 		case strings.Contains(
 			code,
 			"INFORMATION_PANEL",
 		):
-			adjustments.PanelTopRatio =
-				maxFloat(
-					adjustments.PanelTopRatio,
-					0.81,
-				)
+			nudgePanel = true
 
 		case strings.Contains(code, "SPACING"),
 			strings.Contains(code, "HIERARCHY"),
 			strings.Contains(code, "LAYOUT"):
 
-			adjustments.TitleOffsetRatio =
-				maxFloat(
-					adjustments.TitleOffsetRatio,
-					0.04,
-				)
-
-			adjustments.PanelTopRatio =
-				maxFloat(
-					adjustments.PanelTopRatio,
-					0.80,
-				)
+			nudgeTitle = true
+			nudgePanel = true
 		}
 	}
 
-	return adjustments
+	if nudgeTitle {
+		adjustments.TitleOffsetRatio +=
+			reviewTitleStep * scale
+	}
+
+	if nudgePanel {
+		adjustments.PanelTopRatio +=
+			reviewPanelStep * scale
+	}
+
+	if darkPanel {
+		adjustments.PanelTheme = "dark"
+	}
+
+	// 再归一化一次，把叠加后的值夹回合法区间。
+	return domain.NormalizeCompositionAdjustments(adjustments)
+}
+
+func reviewAdjustments(
+	result domain.ReviewResult,
+	round int,
+) domain.CompositionAdjustments {
+	return reviewAdjustmentsAtScale(
+		result,
+		float64(round),
+	)
+}
+
+// ReviewAdjustmentsAreNoOp 判断这一轮重排是否必然产出与上一轮相同的图。
+//
+// 两种情况会为真：
+//   - 没有任何 issue.Code 命中词表（线上 86 条 issue 里 47 条如此），
+//     于是调整等于模板基线，也就是已经生效的那份；
+//   - 递增之后被夹回了同一个边界值，再排一次也没有意义。
+//
+// 命中任一情况就不该烧掉一轮去产出同一张图。
+func ReviewAdjustmentsAreNoOp(
+	result domain.ReviewResult,
+	round int,
+) bool {
+	return reviewAdjustments(result, round) ==
+		reviewAdjustmentsAtScale(
+			result,
+			float64(round-1),
+		)
 }
 
 func joinPromptFragments(

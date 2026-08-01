@@ -1,6 +1,20 @@
-StagePoster API Contract v1.0
+# StagePoster API Contract v1.0
 
-状态：黑客松 MVP 接口契约服务端：Go + SQLite + 本地文件存储 + ComfyUI协作方式：Contract First、异步任务、Mock 优先联调
+> **⚠️ 两处与实现不符，照抄会全线 404。**
+>
+> - **基础路径是 `/api`，不是 `/api/v1`。** 后端没有注册 `/api/v1` 命名空间。
+>   本文档多处写 `/api/v1`，前端那样配会每个请求都 404。
+> - **错误格式是 `{"error": "message"}` + HTTP 状态码，不是
+>   `application/problem+json`。** RFC 9457 那套分类是未实现的设计提案，
+>   详见 `docs/error-codes_cn.md` 顶部的说明。
+>
+> 前端应当对接的真实接口见 **`docs/frontend-api-handoff.md`**（权威）。
+>
+> 本文档其余部分（资源关系、异步任务模型、素材上传约定）与实现基本一致。
+
+状态：黑客松 MVP 接口契约
+服务端：Go + SQLite + 本地文件存储 + ComfyUI
+协作方式：Contract First、异步任务、Mock 优先联调
 
 1. 文档目标
 

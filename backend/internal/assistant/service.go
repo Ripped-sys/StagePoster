@@ -178,11 +178,14 @@ func (s *Service) Get(
 	var reviewSummary *domain.AIReviewSummary
 
 	if session.PosterID != "" {
-		reviews, reviewErr :=
+		reviews, _, reviewErr :=
 			s.posterFlow.ListReviews(
 				ctx,
 				session.PosterID,
-				100,
+				domain.NormalizePage(
+					domain.MaxPageLimit,
+					0,
+				),
 			)
 		if reviewErr != nil {
 			return domain.AISessionResponse{},
@@ -328,6 +331,19 @@ func (s *Service) SendMessage(
 		session.Brief,
 		briefResult,
 	)
+
+	// 这一张图确实进了刚才那次 VLM 调用 —— 是整条链路里最站得住的使用证据。
+	if briefResult.VisionAssetID != "" {
+		if err := s.repository.MarkAISessionAssetsUsed(
+			ctx,
+			sessionID,
+			[]string{briefResult.VisionAssetID},
+			domain.AISessionAssetStageBrief,
+			"作为视觉输入参与需求理解",
+		); err != nil {
+			return domain.AIMessageResponse{}, err
+		}
+	}
 
 	session.Brief = applyAssetBindings(
 		session.Brief,

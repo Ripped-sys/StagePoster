@@ -123,10 +123,14 @@ func (service *Service) AssistBrief(
 	// 当前 vLLM 配置限制每次请求最多一张图片。
 	// 所有 Asset 都会通过 metadata 提供给模型，
 	// 视觉输入优先选择 performer，其次 reference，再其次其他图片。
-	if imagePath := selectBriefVisionAsset(
+	visionAsset, hasVisionAsset := selectBriefVisionAsset(
 		assets,
-	); imagePath != "" {
-		imageURL, err := imageDataURL(imagePath)
+	)
+
+	if hasVisionAsset {
+		imageURL, err := imageDataURL(
+			visionAsset.StoragePath,
+		)
 		if err != nil {
 			return domain.AIBriefAgentResult{},
 				Metrics{},
@@ -179,12 +183,20 @@ func (service *Service) AssistBrief(
 		result.Reply = "已更新海报需求。"
 	}
 
+	// 记下真正附上去的那张图，让调用方能落使用证据。
+	if hasVisionAsset {
+		result.VisionAssetID = visionAsset.AssetID
+	}
+
 	return result, metrics, nil
 }
 
+// selectBriefVisionAsset 返回真正会被附到 VLM 请求上的那个素材。
+// 以前只返回路径，调用方拿不到 assetID，于是"这张图确实参与了需求理解"
+// 这条唯一站得住的使用证据被丢掉了。
 func selectBriefVisionAsset(
 	assets []domain.AISessionAssetRecord,
-) string {
+) (domain.AISessionAssetRecord, bool) {
 	priorities := []domain.AISessionAssetPurpose{
 		domain.AISessionAssetPurposePerformer,
 		domain.AISessionAssetPurposeReference,
@@ -200,10 +212,10 @@ func selectBriefVisionAsset(
 					asset.MimeType,
 					"image/",
 				) {
-				return asset.StoragePath
+				return asset, true
 			}
 		}
 	}
 
-	return ""
+	return domain.AISessionAssetRecord{}, false
 }

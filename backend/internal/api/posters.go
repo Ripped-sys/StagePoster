@@ -12,6 +12,7 @@ import (
 	"github.com/Ripped-sys/StagePoster/backend/internal/domain"
 	posterflow "github.com/Ripped-sys/StagePoster/backend/internal/poster"
 	"github.com/Ripped-sys/StagePoster/backend/internal/repository"
+	"github.com/Ripped-sys/StagePoster/backend/internal/service"
 )
 
 func (s *Server) handlePosters(
@@ -81,11 +82,32 @@ func (s *Server) handlePosters(
 		)
 		return
 
-	case err != nil:
+	// visual.referenceAssetId 指向不存在的素材：调用方的问题，不是 500。
+	case errors.Is(err, repository.ErrNotFound):
 		writeError(
 			writer,
-			http.StatusInternalServerError,
+			http.StatusNotFound,
+			"reference asset not found",
+		)
+		return
+
+	// 带了参考图但这套部署没装 ControlNet 权重。明确拒绝，不静默降级。
+	case errors.Is(
+		err,
+		service.ErrReferenceControlUnavailable,
+	):
+		writeError(
+			writer,
+			http.StatusConflict,
 			err.Error(),
+		)
+		return
+
+	case err != nil:
+		writeInternalError(
+			writer,
+			request,
+			err,
 		)
 		return
 	}
@@ -256,10 +278,10 @@ func (s *Server) handlePosterGet(
 	}
 
 	if err != nil {
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
@@ -369,10 +391,10 @@ func (s *Server) handleCandidateImage(
 		return
 
 	case err != nil:
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
@@ -464,11 +486,20 @@ func (s *Server) servePosterFile(
 		)
 		return
 
-	case err != nil:
+	// 记录还在但磁盘上的文件没了。对客户端来说和记录不存在是一回事，都是 404。
+	case errors.Is(err, posterflow.ErrOutputMissing):
 		writeError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			http.StatusNotFound,
+			notFoundMessage,
+		)
+		return
+
+	case err != nil:
+		writeInternalError(
+			writer,
+			request,
+			err,
 		)
 		return
 	}
@@ -511,10 +542,10 @@ func (s *Server) handlePosterCancel(
 		return
 
 	case err != nil:
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}
@@ -580,10 +611,10 @@ func (s *Server) handleCandidateRetry(
 		return
 
 	case err != nil:
-		writeError(
+		writeInternalError(
 			writer,
-			http.StatusInternalServerError,
-			err.Error(),
+			request,
+			err,
 		)
 		return
 	}

@@ -161,12 +161,30 @@ sleep
 → sleep
 ```
 
-关键参数：
+> **⚠️ 已废弃 —— 不要照抄下面的 sleep mode 参数。**
+>
+> 本节记录的是当初 bring-up 时验证过的配置。后来发现在 **ROCm 7.2 + vLLM
+> 0.20.0** 上 `--enable-sleep-mode` 会破坏生成：第一次 sleep→wake 循环之后，
+> 后续每个请求都以 `CUDA Error: invalid argument` 失败。
+>
+> 因此生产启动脚本 `scripts/start-all.sh` **不再开启 sleep mode，也从不请求
+> 睡眠**，而是打印 `VLM resident (sleep mode disabled on ROCm)`。显存改由 Go
+> 运行时协调器在调用 VLM 前调用 `ReleaseComfyMemory` 卸载 ComfyUI 模型来回收。
+>
+> 另有两个本节尚未包含、但现在必须加的参数：
+> - `--mm-processor-cache-gb 0` —— 默认 4 GB 的多模态预处理缓存运行一段时间后
+>   会自我损坏，之后每个带图请求都 500，报
+>   `AssertionError: Expected a cached item for mm_hash=...`
+> - `VLLM_SERVER_DEV_MODE=1` 必须**保持内网**，它会在 8001 暴露无鉴权的管理端点。
+>
+> 请使用 `scripts/start-all.sh`，而不是下面的命令。
+
+关键参数（bring-up 当时验证；sleep 那一项见上方警告，现已不用）：
 
 ```bash
 VLLM_ROCM_SLEEP_MEM_CHUNK_SIZE=64
 --gpu-memory-utilization 0.65
---enable-sleep-mode
+--enable-sleep-mode           # ← 已废弃，在 ROCm 7.2 上会破坏生成
 ```
 
 以下旧配置曾导致 OOM 或 `cumem_allocator.cpp invalid argument`：
@@ -214,7 +232,7 @@ nohup env \
   --gpu-memory-utilization 0.65 \
   --limit-mm-per-prompt '{"image":{"count":1,"width":768,"height":1152},"video":0}' \
   --enforce-eager \
-  --enable-sleep-mode \
+  --mm-processor-cache-gb 0 \
   --default-chat-template-kwargs '{"enable_thinking":false}' \
   --generation-config vllm \
   > /workspace/poster-engine/logs/vllm/server.log \
@@ -612,10 +630,10 @@ nohup env \
   WORKFLOW_PATH=/workspace/poster-engine/workflows/z_image_poster_v1.json \
   PROMPT_NODE_ID='57:27' \
   SEED_NODE_ID='57:3' \
-  DB_PATH=/workspace/poster-engine/backend/data/poster.db \
-  STORAGE_ROOT=/workspace/poster-engine/backend/storage/jobs \
-  ASSET_STORAGE_ROOT=/workspace/poster-engine/backend/storage/assets \
-  POSTER_OUTPUT_ROOT=/workspace/poster-engine/backend/storage/posters \
+  DB_PATH=/workspace/persistence/stageposter/data/poster.db \
+  STORAGE_ROOT=/workspace/persistence/stageposter/storage/jobs \
+  ASSET_STORAGE_ROOT=/workspace/persistence/stageposter/storage/assets \
+  POSTER_OUTPUT_ROOT=/workspace/persistence/stageposter/storage/posters \
   WORKFLOW_KEY=poster-text \
   WORKFLOW_VERSION=1.0.0 \
   RECONCILE_INTERVAL=2s \

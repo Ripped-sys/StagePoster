@@ -9,8 +9,8 @@ import (
 )
 
 type ReviewMaterial struct {
-	Poster    domain.PosterRecord  `json:"poster"`
-	Output    domain.PosterOutput  `json:"output"`
+	Poster    domain.PosterRecord     `json:"poster"`
+	Output    domain.PosterOutput     `json:"output"`
 	Candidate *domain.CandidateRecord `json:"candidate,omitempty"`
 }
 
@@ -82,22 +82,66 @@ func (s *Service) SaveReview(
 	)
 }
 
+// ListReviews 返回一页复审记录和该海报的复审总轮数。
+// 总数是分页必需的：只有当前页行数的话，客户端没法知道还有没有下一页。
 func (s *Service) ListReviews(
 	ctx context.Context,
 	posterID string,
-	limit int,
-) ([]domain.PosterReviewRecord, error) {
+	page domain.Page,
+) ([]domain.PosterReviewRecord, int, error) {
 	// 先确认 poster 存在，避免未知 poster 返回空数组。
 	if _, err := s.repository.GetPoster(
 		ctx,
 		posterID,
 	); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	return s.repository.ListPosterReviews(
+	reviews, err := s.repository.ListPosterReviews(
 		ctx,
 		posterID,
-		limit,
+		page,
 	)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	total, err := s.repository.CountPosterReviews(
+		ctx,
+		posterID,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return reviews, total, nil
+}
+
+// Metrics 返回一张海报的任务级成本汇总：复审轮数、累计 token、累计复审耗时，
+// 以及包含 GPU 排队与图像生成的墙上时间。
+func (s *Service) Metrics(
+	ctx context.Context,
+	posterID string,
+) (domain.PosterMetrics, error) {
+	posterRecord, err := s.repository.GetPoster(
+		ctx,
+		posterID,
+	)
+	if err != nil {
+		return domain.PosterMetrics{}, err
+	}
+
+	metrics, err := s.repository.
+		AggregatePosterReviewMetrics(ctx, posterID)
+	if err != nil {
+		return domain.PosterMetrics{}, err
+	}
+
+	metrics.WallClockSeconds = int(
+		posterRecord.UpdatedAt.
+			Sub(posterRecord.CreatedAt).
+			Seconds(),
+	)
+
+	return metrics, nil
 }

@@ -699,3 +699,70 @@ func (r *Repository) ListActivePosters(
 
 	return posters, nil
 }
+
+// MedianPosterDurationSeconds 返回历史上已成功海报的中位总耗时，用于 ETA。
+//
+// 样本不足时返回 ok=false —— 编一个进度估计比不给估计更糟，客户端宁可不显示
+// ETA 也不该显示一个凭空来的数字。
+func (r *Repository) MedianPosterDurationSeconds(
+	ctx context.Context,
+	minimumSamples int,
+) (int, bool, error) {
+	if minimumSamples < 1 {
+		minimumSamples = 3
+	}
+
+	var count int
+
+	if err := r.db.QueryRowContext(
+		ctx,
+		`
+		SELECT COUNT(*)
+		FROM poster_requests
+		WHERE status = ?
+		`,
+		string(domain.PosterStatusSucceeded),
+	).Scan(&count); err != nil {
+		return 0, false, fmt.Errorf(
+			"count succeeded posters: %w",
+			err,
+		)
+	}
+
+	if count < minimumSamples {
+		return 0, false, nil
+	}
+
+	var median float64
+
+	err := r.db.QueryRowContext(
+		ctx,
+		`
+		SELECT duration
+		FROM (
+			SELECT
+				(julianday(updated_at) - julianday(created_at))
+					* 86400.0 AS duration
+			FROM poster_requests
+			WHERE status = ?
+			ORDER BY duration
+		)
+		LIMIT 1
+		OFFSET ?
+		`,
+		string(domain.PosterStatusSucceeded),
+		count/2,
+	).Scan(&median)
+	if err != nil {
+		return 0, false, fmt.Errorf(
+			"median poster duration: %w",
+			err,
+		)
+	}
+
+	if median <= 0 {
+		return 0, false, nil
+	}
+
+	return int(median), true, nil
+}

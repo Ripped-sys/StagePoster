@@ -125,13 +125,16 @@ func (s *Service) CreateFromDesignPlan(
 
 		generation, err := s.core.Generate(
 			ctx,
-			domain.GenerateRequest{
-				Prompt: compiledPrompt,
-				NegativePrompt: buildDesignPlanNegativePrompt(
-					plan,
-				),
-				Seed: &seed,
-			},
+			applyReferenceControl(
+				domain.GenerateRequest{
+					Prompt: compiledPrompt,
+					NegativePrompt: buildDesignPlanNegativePrompt(
+						plan,
+					),
+					Seed: &seed,
+				},
+				request.Visual,
+			),
 		)
 		if err != nil {
 			_ = s.repository.UpdatePosterStatus(

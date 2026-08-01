@@ -297,21 +297,35 @@ func (c *Composer) Compose(
 		return domain.ComposeResult{}, err
 	}
 
-	if err := c.drawEventLogo(
+	usedAssetIDs := make([]string, 0, 4)
+
+	eventLogoUsed, err := c.drawEventLogo(
 		canvas,
 		input.EventLogo,
-	); err != nil {
+	)
+	if err != nil {
 		return domain.ComposeResult{}, err
 	}
 
-	if err := c.drawArtistIdentity(
+	usedAssetIDs = append(
+		usedAssetIDs,
+		eventLogoUsed...,
+	)
+
+	artistLogoUsed, err := c.drawArtistIdentity(
 		canvas,
 		input.Event.Artist,
 		input.ArtistLogo,
 		panelTop,
-	); err != nil {
+	)
+	if err != nil {
 		return domain.ComposeResult{}, err
 	}
+
+	usedAssetIDs = append(
+		usedAssetIDs,
+		artistLogoUsed...,
+	)
 
 	if err := c.drawInformationPanel(
 		canvas,
@@ -322,13 +336,19 @@ func (c *Composer) Compose(
 		return domain.ComposeResult{}, err
 	}
 
-	if err := c.drawSponsorLogos(
+	sponsorsUsed, err := c.drawSponsorLogos(
 		canvas,
 		input.Sponsors,
 		panelTop,
-	); err != nil {
+	)
+	if err != nil {
 		return domain.ComposeResult{}, err
 	}
+
+	usedAssetIDs = append(
+		usedAssetIDs,
+		sponsorsUsed...,
+	)
 
 	if err := ctx.Err(); err != nil {
 		return domain.ComposeResult{}, err
@@ -412,86 +432,19 @@ func (c *Composer) Compose(
 		Height:          input.Height,
 		ThumbnailWidth:  thumbnailWidth,
 		ThumbnailHeight: thumbnailHeight,
+		UsedAssetIDs:    usedAssetIDs,
 	}, nil
 }
 
+// normalizeCompositionAdjustments 委托给 domain。
+//
+// 默认值和夹取区间移到了 domain.NormalizeCompositionAdjustments，因为审查循环
+// 也需要解析"某模板的生效值"才能在其上做增量。留这个薄封装是为了不动
+// composer 内部的调用点和既有测试。
 func normalizeCompositionAdjustments(
 	adjustments domain.CompositionAdjustments,
 ) domain.CompositionAdjustments {
-	switch strings.ToLower(
-		strings.TrimSpace(adjustments.Template),
-	) {
-	case "editorial_top":
-		if adjustments.TitleOffsetRatio == 0 {
-			adjustments.TitleOffsetRatio = 0.035
-		}
-
-		if adjustments.PanelTopRatio == 0 {
-			adjustments.PanelTopRatio = 0.80
-		}
-
-	case "cinematic_center":
-		if adjustments.TitleOffsetRatio == 0 {
-			adjustments.TitleOffsetRatio = 0.055
-		}
-
-		if adjustments.PanelTopRatio == 0 {
-			adjustments.PanelTopRatio = 0.81
-		}
-
-		if strings.TrimSpace(
-			adjustments.PanelTheme,
-		) == "" {
-			adjustments.PanelTheme = "dark"
-		}
-
-	case "gothic_frame":
-		if adjustments.TitleOffsetRatio == 0 {
-			adjustments.TitleOffsetRatio = 0.045
-		}
-
-		if adjustments.PanelTopRatio == 0 {
-			adjustments.PanelTopRatio = 0.82
-		}
-
-		if strings.TrimSpace(
-			adjustments.PanelTheme,
-		) == "" {
-			adjustments.PanelTheme = "dark"
-		}
-	}
-
-	if adjustments.PanelTopRatio == 0 {
-		adjustments.PanelTopRatio = 0.77
-	}
-
-	if adjustments.PanelTopRatio < 0.70 {
-		adjustments.PanelTopRatio = 0.70
-	}
-
-	if adjustments.PanelTopRatio > 0.86 {
-		adjustments.PanelTopRatio = 0.86
-	}
-
-	if adjustments.TitleOffsetRatio < 0 {
-		adjustments.TitleOffsetRatio = 0
-	}
-
-	if adjustments.TitleOffsetRatio > 0.12 {
-		adjustments.TitleOffsetRatio = 0.12
-	}
-
-	switch strings.ToLower(
-		strings.TrimSpace(adjustments.PanelTheme),
-	) {
-	case "dark":
-		adjustments.PanelTheme = "dark"
-
-	default:
-		adjustments.PanelTheme = "light"
-	}
-
-	return adjustments
+	return domain.NormalizeCompositionAdjustments(adjustments)
 }
 
 func informationPanelColors(
@@ -893,12 +846,14 @@ func (c *Composer) drawTitle(
 	return nil
 }
 
+// drawEventLogo 返回真正画上画布的素材 ID。使用证据只能来自这里：
+// StoragePath 为空就直接跳过，调用方光看"合成成功"分不出画了还是没画。
 func (c *Composer) drawEventLogo(
 	canvas *image.NRGBA,
 	logo domain.CompositionAsset,
-) error {
+) ([]string, error) {
 	if logo.StoragePath == "" {
-		return nil
+		return nil, nil
 	}
 
 	target := image.Rect(
@@ -913,13 +868,13 @@ func (c *Composer) drawEventLogo(
 		logo,
 		target,
 	); err != nil {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"compose event logo: %w",
 			err,
 		)
 	}
 
-	return nil
+	return []string{logo.ID}, nil
 }
 
 func (c *Composer) drawArtistIdentity(
@@ -927,7 +882,7 @@ func (c *Composer) drawArtistIdentity(
 	artist string,
 	logo domain.CompositionAsset,
 	panelTop int,
-) error {
+) ([]string, error) {
 	if logo.StoragePath != "" {
 		target := image.Rect(
 			int(float64(canvas.Bounds().Dx())*0.19),
@@ -941,19 +896,19 @@ func (c *Composer) drawArtistIdentity(
 			logo,
 			target,
 		); err != nil {
-			return fmt.Errorf(
+			return nil, fmt.Errorf(
 				"compose artist logo: %w",
 				err,
 			)
 		}
 
-		return nil
+		return []string{logo.ID}, nil
 	}
 
 	artist = strings.TrimSpace(artist)
 
 	if artist == "" {
-		return nil
+		return nil, nil
 	}
 
 	face, err := c.fitSingleLineFace(
@@ -964,7 +919,7 @@ func (c *Composer) drawArtistIdentity(
 		28,
 	)
 	if err != nil {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"create artist font: %w",
 			err,
 		)
@@ -980,7 +935,8 @@ func (c *Composer) drawArtistIdentity(
 		color.White,
 	)
 
-	return nil
+	// 只画了文字，没有用到任何素材。
+	return nil, nil
 }
 
 func (c *Composer) drawInformationPanel(
@@ -1166,9 +1122,9 @@ func (c *Composer) drawSponsorLogos(
 	canvas *image.NRGBA,
 	sponsors []domain.CompositionAsset,
 	panelTop int,
-) error {
+) ([]string, error) {
 	if len(sponsors) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	if len(sponsors) > 5 {
@@ -1189,8 +1145,10 @@ func (c *Composer) drawSponsorLogos(
 	bottom := canvas.Bounds().Dy() - 28
 
 	if bottom <= top {
-		return nil
+		return nil, nil
 	}
+
+	drawn := make([]string, 0, len(sponsors))
 
 	for index, sponsor := range sponsors {
 		left := startX +
@@ -1206,15 +1164,21 @@ func (c *Composer) drawSponsorLogos(
 				bottom,
 			),
 		); err != nil {
-			return fmt.Errorf(
+			return nil, fmt.Errorf(
 				"compose sponsor logo %s: %w",
 				sponsor.ID,
 				err,
 			)
 		}
+
+		if strings.TrimSpace(
+			sponsor.StoragePath,
+		) != "" {
+			drawn = append(drawn, sponsor.ID)
+		}
 	}
 
-	return nil
+	return drawn, nil
 }
 
 func (c *Composer) drawAssetContained(

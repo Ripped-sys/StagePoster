@@ -208,8 +208,10 @@ Key variables from `.env` (project root):
 | `POSTER_FONT_BOLD` | `""` | Bold font path |
 | `RECONCILE_INTERVAL` | `2s` | Reconciler poll interval |
 | `PROMPT_NODE_ID` | `57:27` | ComfyUI prompt node |
-| `NEGATIVE_PROMPT_NODE_ID` | `""` | ComfyUI negative prompt node |
+| `NEGATIVE_PROMPT_NODE_ID` | `57:34` | ComfyUI negative prompt node |
+| `COMFY_CFG` | `""` | Sampler cfg override; empty keeps the workflow value (2). Negative prompts only apply when cfg > 1 |
 | `SEED_NODE_ID` | `57:3` | ComfyUI seed node |
+| `REFERENCE_CONTROL_PATCH` | `""` | Z-Image ControlNet patch filename under `ComfyUI/models/model_patches`. Enables reference-image conditioning; empty means reference images only reach the brief-understanding VLM call |
 
 ---
 
@@ -228,6 +230,16 @@ Key variables from `.env` (project root):
   polls `/history/{prompt_id}` until `completed` or `failed`.
 - Output images are in ComfyUI's output dir, copied to `STORAGE_ROOT` via
   `storage.FileStore`.
+- **Reference-image conditioning is injected, not templated.** The workflow JSON
+  has no reference nodes. When a request carries a reference asset,
+  `comfy.Template.Build` injects `LoadImage` → `Canny` → `ModelPatchLoader` →
+  `ZImageFunControlnet` into the *cloned* graph and rewires the sampler's `model`
+  input through the ControlNet. Requests without a reference produce a
+  byte-identical graph to before, which is what keeps this from regressing every
+  existing caller. Do not move these nodes into the template file.
+- The reference image must reach ComfyUI first: `comfy.Client.UploadImage` posts
+  to `/upload/image` rather than writing into ComfyUI's `input/` directory, so a
+  containerized or remote ComfyUI keeps working.
 
 ### SQLite
 - Uses `modernc.org/sqlite` (pure Go, no CGO).
@@ -246,7 +258,12 @@ Key variables from `.env` (project root):
 - All POST request bodies are JSON.
 - Error responses: `{"error": "message"}` + appropriate HTTP status.
 - Success responses: `{"data": ...}` or the resource object directly.
-- Pagination: list endpoints return `items []` + `total int`.
+- Pagination: list endpoints accept `?limit=` (1–100, default 20) and
+  `?offset=` (default 0). Out-of-range values are rejected with 400 rather than
+  silently clamped. The envelope carries `items []` plus `count` (rows in this
+  page), `total` (rows in the table), `limit` and `offset`. Earlier revisions of
+  this file documented a single `total int` and no `count`; the code only ever
+  returned `count`, so both are now present and described as they are.
 - Auth: `Authorization: Bearer <POSTER_API_TOKEN>` (optional, recommended for
   production).
 
@@ -262,8 +279,12 @@ Key variables from `.env` (project root):
   `r.Context()`.
 - **Logging**: use stdlib `log`. Structured logging recommended for production.
 - **ID generation**: use `domain.NewID(prefix)` for `prefix_xxxxxxxx` format.
-- **JSON**: field names use `json:"snake_case"`. API request/response shapes are
-  consistent.
+- **JSON**: field names use `json:"camelCase"` (`posterId`, `sessionId`,
+  `createdAt`). This file previously said `snake_case`, which never matched the
+  code. API request/response shapes are consistent.
+- **Errors**: 500 responses return a generic `{"error":"internal server error"}`
+  and log the real cause server-side. Never pass `err.Error()` to the client on
+  a 500 — filesystem paths and driver internals leak that way.
 - **File paths**: read absolute paths from env vars. Never hardcode.
 
 ---
@@ -277,3 +298,76 @@ After modifying code:
 - [ ] New env vars → add to `.env.example` and `main.go` `env()` calls
 - [ ] New ComfyUI node bindings → update node ID comments in `scripts/`
 - [ ] Smoke test passes: `./scripts/smoke-test.sh`
+- [ ] Full route regression: `.venv-vllm/bin/python scripts/e2e-test.py all`
+      (30 routes, 127 assertions). **Use that interpreter, not bare `python3`** —
+      the script needs Pillow to synthesize test images, and only `.venv-vllm`
+      has it. System `python3` fails with `ModuleNotFoundError: No module named
+      'PIL'` before running a single assertion.
+
+---
+
+## 11. Persistence and Backup
+
+The cloud host gets reset, so "which directory does this live in" is a
+correctness question, not an ops preference.
+
+### Directory contract
+
+The NFS persistence root is `/workspace/persistence`. This project uses
+`/workspace/persistence/stageposter/`, and all four data paths in `.env` point
+there:
+
+```
+DB_PATH             = /workspace/persistence/stageposter/data/poster.db
+STORAGE_ROOT        = /workspace/persistence/stageposter/storage/jobs
+ASSET_STORAGE_ROOT  = /workspace/persistence/stageposter/storage/assets
+POSTER_OUTPUT_ROOT  = /workspace/persistence/stageposter/storage/posters
+```
+
+**`backend/data/poster.db` is a stale leftover, not the live database.** It is
+still on disk and it is still what the documented `DB_PATH` *default* resolves
+to. Backing up or debugging the wrong one yields data that looks plausible but
+is days old. The only source of truth for the live path is `DB_PATH` in `.env`.
+
+### Backup
+
+```bash
+bash scripts/backup-persistence.sh          # fast
+bash scripts/backup-persistence.sh --hash   # adds weight sha256, slow
+```
+
+Output lands in `/workspace/persistence/stageposter/backups/<timestamp>/`, with
+`backups/latest` symlinked to the newest. Each contains `RESTORE.md`
+(step-by-step), a consistent DB snapshot, `env.backup`, a weight manifest, and
+git state.
+
+Three deliberate design choices — read these before changing the script:
+
+1. **The DB uses `VACUUM INTO`, not `cp`.** With the backend live, the WAL can
+   hold megabytes not yet checkpointed, so a plain copy is either stale or torn.
+   `VACUUM INTO` takes a read snapshot and folds the WAL into one file; the
+   script then runs `integrity_check` on *the snapshot*, because the claim worth
+   asserting is "this backup is usable", not "the source isn't corrupt".
+2. **`.env` must be backed up.** It is `.gitignore`d, so it is the only copy on
+   the machine.
+3. **The 43 GB of weights are not backed up, only inventoried.** There isn't
+   that much free space. The manifest exists to verify a re-download — see below.
+
+### Two traps when restoring
+
+- **Re-downloading weights requires `HF_HUB_DISABLE_XET=1`.** huggingface.co is
+  unreachable so downloads go through hf-mirror, but setting `HF_ENDPOINT` alone
+  is not enough: Xet-backed large files bypass the mirror straight to
+  `cas-server.xethub.hf.co` and 401. **Small files land, the weights don't, the
+  directory looks populated, and the exit code can still be 0.** The only
+  reliable check is byte sizes against `model-manifest.txt`.
+- **Delete the old `-wal` / `-shm` when restoring a DB**, or SQLite will apply a
+  stale WAL over the fresh file.
+
+### Explicitly out of scope
+
+`storage/` (candidates, final posters, uploaded assets, ~410 MB) exists only in
+the persistence directory. If all of `/workspace/persistence` is lost, poster
+history is lost and DB rows will reference missing files. This is a **known,
+accepted** tradeoff: outputs are regenerable and the original briefs are in the
+database.

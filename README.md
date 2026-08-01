@@ -246,13 +246,20 @@ Runtime identity: `poster-text@1.0.0`
 | `WORKFLOW_PATH` | `workflows/z_image_poster_v1.json` | ComfyUI workflow |
 | `WORKFLOW_KEY` | `poster-text` | Workflow identifier |
 | `WORKFLOW_VERSION` | `1.0.0` | Workflow version |
-| `POSTER_API_TOKEN` | `""` | API auth token |
+| `POSTER_API_TOKEN` | `""` | API auth token. **Empty = unauthenticated** |
 | `CORS_ORIGIN` | `*` | CORS origin |
 | `POSTER_FONT_REGULAR` | `""` | Regular font path |
 | `POSTER_FONT_BOLD` | `""` | Bold font path |
 | `RECONCILE_INTERVAL` | `2s` | Reconciler poll interval |
 | `PROMPT_NODE_ID` | `57:27` | ComfyUI prompt node |
+| `NEGATIVE_PROMPT_NODE_ID` | `57:34` | ComfyUI negative prompt node |
+| `COMFY_CFG` | `""` | Sampler cfg override; empty keeps the workflow value (2). Negative prompts only apply when cfg > 1 |
 | `SEED_NODE_ID` | `57:3` | ComfyUI seed node |
+| `REFERENCE_CONTROL_PATCH` | `""` | Z-Image ControlNet patch filename under `ComfyUI/models/model_patches`. Enables reference-image conditioning; empty means reference images only reach the brief-understanding VLM call |
+
+> The backend binary does **not** read `.env` by itself — `scripts/start-all.sh`
+> does `set -a; source .env; set +a`. Launching `./poster-backend` by hand
+> silently drops these values with no error.
 
 ---
 
@@ -391,6 +398,33 @@ became ready. Fixed in commit `93cec30`.
 Reconciler goroutines now have `panic recovery` wrappers. A panic is logged as
 a warning and the tick loop continues.
 
+### hf-mirror downloads silently truncate
+
+huggingface.co is unreachable from this host, so downloads go through
+hf-mirror. Setting `HF_ENDPOINT` alone is **not sufficient**: Xet-backed large
+files bypass the mirror and connect directly to `cas-server.xethub.hf.co`,
+which returns 401. The failure is silent in the worst way — small files
+(config, tokenizer) land fine, so the directory looks populated, and the exit
+code can still be 0 while the actual weights are missing or truncated.
+
+Always export `HF_HUB_DISABLE_XET=1`, and verify by **byte size**, not by exit
+status. `scripts/backup-persistence.sh` writes a `model-manifest.txt` for
+exactly this comparison.
+
+### vLLM multimodal cache self-corrupts
+
+vLLM must be started with `--mm-processor-cache-gb 0`. The default of 4 causes
+every image-bearing request to fail with HTTP 500 and
+`AssertionError: Expected a cached item for mm_hash=...` after some uptime,
+while text-only requests keep working. That asymmetry reads like a backend bug.
+`scripts/start-all.sh` already passes the flag.
+
+### Reference-image output is not reproducible
+
+On this ROCm card, the same seed plus a reference image produces different
+output hashes across runs. The no-reference path is stable. Do not build tests
+that assume byte-identical output when `referenceAssetId` is set.
+
 ---
 
 ## Frontend Integration Checklist
@@ -451,10 +485,47 @@ rm -f run/cloudflared.pid run/public-api-url.txt
 
 ---
 
+## Backup
+
+The host is reset during platform maintenance windows. Everything the backend
+writes at runtime already lives under `/workspace/persistence/stageposter/`
+(see the env table above), but two things are not covered by that and not
+covered by git either:
+
+- **`.env`** — `.gitignore`d, so the machine holds the only copy.
+- **The 43 GB of model weights** — too large to back up; re-downloaded instead.
+
+Run before a maintenance window:
+
+```bash
+bash scripts/backup-persistence.sh          # fast
+bash scripts/backup-persistence.sh --hash   # adds weight sha256, slow
+```
+
+This writes `/workspace/persistence/stageposter/backups/<timestamp>/`
+(plus a `backups/latest` symlink) containing a consistent SQLite snapshot,
+`env.backup`, a model manifest, git state, and a `RESTORE.md` with the exact
+restore steps.
+
+Two things worth knowing before you rely on any of this:
+
+- The DB snapshot uses `VACUUM INTO`, not `cp`. With the backend live the WAL
+  can hold data not yet checkpointed, so a plain file copy is either stale or
+  torn. When restoring, delete the old `-wal`/`-shm` files or SQLite will apply
+  a stale WAL over the fresh database.
+- `backend/data/poster.db` still exists but is a **stale leftover, not the live
+  database**. The live path is whatever `DB_PATH` in `.env` says.
+
+Re-downloading weights requires `HF_HUB_DISABLE_XET=1` — see
+[Known Issues](#hf-mirror-downloads-silently-truncate).
+
+---
+
 ## Documentation
 
 | Document | Description |
 |---|---|
+| [docs/frontend-api-handoff.md](docs/frontend-api-handoff.md) | **Authoritative frontend API contract — start here** |
 | [docs/one-click-deployment.md](docs/one-click-deployment.md) | Full one-command deployment |
 | [docs/api-contract.md](docs/api-contract.md) | API contract v1.0 |
 | [docs/creative-brief-schema.md](docs/creative-brief-schema.md) | Brief schema and prompt translation |
@@ -462,7 +533,7 @@ rm -f run/cloudflared.pid run/public-api-url.txt
 | [docs/asset-contract.md](docs/asset-contract.md) | Asset upload and lifecycle |
 | [docs/job-lifecycle.md](docs/job-lifecycle.md) | Async job states and recovery |
 | [docs/conversation-flow.md](docs/conversation-flow.md) | AI conversation state machine |
-| [docs/frontend-integration.md](docs/frontend-integration.md) | Frontend integration guide |
+| [docs/frontend-integration.md](docs/frontend-integration.md) | *Superseded by the handoff doc.* Keeps a usable TypeScript client skeleton; do not read it for the contract |
 | [docs/cloudflare-tunnel.md](docs/cloudflare-tunnel.md) | Cloudflare Quick Tunnel setup |
 | [docs/GPU_RUNTIME_REPRODUCTION.md](docs/GPU_RUNTIME_REPRODUCTION.md) | Single-GPU reproduction guide |
 | [CLAUDE.md](CLAUDE.md) | Project guide for AI coding agents |

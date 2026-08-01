@@ -101,6 +101,14 @@ start_vllm() {
   (
     cd "$ROOT"
 
+    # mm-processor-cache-gb=0 关掉多模态预处理缓存。
+    #
+    # 默认 4GB 的那个缓存在这套 vLLM 上会把自己搞坏：跑过一段时间后，任何带图的
+    # 请求都稳定 500，engine 日志是
+    #   AssertionError: Expected a cached item for mm_hash=...
+    # （vllm/multimodal/cache.py get_and_update_item）。纯文本请求不受影响，所以
+    # 表现为"AI 会话一旦附了素材就必失败"。我们每次请求只送一张小图，重算的代价
+    # 可以忽略，缓存带来的收益远不值这个稳定性代价。
     nohup env \
       VLLM_SERVER_DEV_MODE="${VLLM_SERVER_DEV_MODE:-1}" \
       VLLM_ROCM_SLEEP_MEM_CHUNK_SIZE="${VLLM_ROCM_SLEEP_MEM_CHUNK_SIZE:-256}" \
@@ -115,6 +123,7 @@ start_vllm() {
         --max-num-batched-tokens "${VLLM_MAX_BATCHED_TOKENS:-4096}" \
         --gpu-memory-utilization "${VLLM_GPU_MEMORY_UTILIZATION:-0.65}" \
         --limit-mm-per-prompt '{"image":{"count":1,"width":768,"height":1152},"video":0}' \
+        --mm-processor-cache-gb "${VLLM_MM_PROCESSOR_CACHE_GB:-0}" \
         --enforce-eager \
         --default-chat-template-kwargs '{"enable_thinking":false}' \
         --generation-config vllm \

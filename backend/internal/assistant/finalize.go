@@ -81,10 +81,13 @@ func (s *Service) Finalize(
 	}
 
 	for {
-		reviews, err := s.posterFlow.ListReviews(
+		reviews, _, err := s.posterFlow.ListReviews(
 			ctx,
 			session.PosterID,
-			100,
+			domain.NormalizePage(
+				domain.MaxPageLimit,
+				0,
+			),
 		)
 		if err != nil {
 			return domain.AISessionResponse{}, err
@@ -197,11 +200,31 @@ func (s *Service) Finalize(
 
 		switch latest.Decision {
 		case domain.ReviewDecisionRecompose:
+			// 如果算出来的版式和已经生效的完全一样，重排必然产出同一张图，
+			// VLM 也必然给同一个分 —— 烧掉一轮换不到任何东西。
+			// 直接收敛到当前最佳版本。
+			if posterflow.ReviewAdjustmentsAreNoOp(
+				latest.Result,
+				latest.Round,
+			) {
+				if err := s.finalizeBestAvailable(
+					ctx,
+					&session,
+					reviews,
+					"重排不会改变版式，已保留评分最高的版本。",
+				); err != nil {
+					return domain.AISessionResponse{}, err
+				}
+
+				return s.Get(ctx, session.ID)
+			}
+
 			actionErr =
 				s.posterFlow.RecomposeFromReview(
 					ctx,
 					session.PosterID,
 					latest.Result,
+					latest.Round,
 				)
 
 		case domain.ReviewDecisionRegenerate:
@@ -217,6 +240,7 @@ func (s *Service) Finalize(
 					ctx,
 					session.PosterID,
 					latest.Result,
+					latest.Round,
 				)
 
 		case domain.ReviewDecisionRewriteBrief:

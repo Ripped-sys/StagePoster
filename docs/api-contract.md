@@ -68,8 +68,12 @@ GPU
 Frontend only needs to configure:
 
 ```
-API_BASE_URL=https://your-backend-address/api/v1
+API_BASE_URL=https://your-backend-address/api
 ```
+
+> The base path is `/api`, **not** `/api/v1`. No `/api/v1` namespace is
+> registered in the backend. Earlier revisions of this document said `/api/v1`
+> throughout; a frontend configured that way 404s on every call.
 
 With this setup, the frontend developer does NOT need to:
 - Install ComfyUI
@@ -157,12 +161,12 @@ from the frontend.
 
 Local:
 ```
-http://localhost:8080/api/v1
+http://localhost:8080/api
 ```
 
 Remote:
 ```
-https://<backend-host>/api/v1
+https://<backend-host>/api
 ```
 
 ### 6.2 Content-Type
@@ -171,8 +175,15 @@ https://<backend-host>/api/v1
 |---|---|
 | Standard request | `application/json` |
 | Asset upload | `multipart/form-data` |
-| Standard error | `application/problem+json` |
+| Standard error | `application/json` |
 | Image output | Corresponding image MIME type |
+
+> Errors are a plain `{"error": "message"}` envelope with an appropriate HTTP
+> status, **not** RFC 9457 `application/problem+json`. The problem+json taxonomy
+> in `docs/error-codes.md` is an unimplemented design spec. 500 responses return
+> a generic `{"error":"internal server error"}` and log the real cause
+> server-side.
+
 
 ### 6.3 Request Headers
 
@@ -325,7 +336,19 @@ Returns the asset file with appropriate MIME type.
 
 ## 9. Error Handling
 
-All errors follow RFC 9457 Problem Details format:
+Errors are returned as a plain JSON envelope with an appropriate HTTP status:
+
+```json
+{ "error": "asset not found" }
+```
+
+500 responses return a generic `{"error":"internal server error"}` and log the
+real cause server-side — filesystem paths and driver internals must not leak to
+the client.
+
+> **The RFC 9457 shape below is an unimplemented design proposal**, kept for
+> reference. The backend has never emitted `application/problem+json`, and there
+> is no `/api/v1` namespace. Do not code the frontend against it.
 
 ```json
 {
@@ -339,6 +362,9 @@ All errors follow RFC 9457 Problem Details format:
   "retryable": false
 }
 ```
+
+The code names below remain a useful reference for which conditions the system
+distinguishes, even though they are not returned on the wire in this form.
 
 Common error codes:
 
