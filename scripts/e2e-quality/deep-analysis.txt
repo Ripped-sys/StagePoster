@@ -1,0 +1,169 @@
+======================================================================
+  IMAGE FILE INFO
+======================================================================
+
+[poster]
+  filename: poster_poster_56679f97-b470-4988-8fbf-b8fe060ee5de.png
+  format: PNG
+  mode: RGB
+  size: (1024, 1536)
+  file_size_kb: 947
+
+[candidate]
+  filename: candidate_candidate_e51db786-92a1-44a8-8c49-59721cfb2c94.png
+  format: PNG
+  mode: RGB
+  size: (1024, 1536)
+  file_size_kb: 1193
+
+[thumb]
+  filename: thumb_poster_56679f97-b470-4988-8fbf-b8fe060ee5de.png
+  format: PNG
+  mode: RGB
+  size: (512, 768)
+  file_size_kb: 287
+======================================================================
+  PIXEL STATISTICS
+======================================================================
+
+── poster ──
+  shape     : (1536, 1024)
+  overall   : mean=0.3904  std=0.3466
+  R         : mean=0.3959  std=0.3611  min=0.0  max=1.0
+  G         : mean=0.3924  std=0.3512  min=0.0  max=1.0
+  B         : mean=0.3829  std=0.3266  min=0.0  max=1.0
+
+── candidate ──
+  shape     : (1536, 1024)
+  overall   : mean=0.3993  std=0.3793
+  R         : mean=0.3967  std=0.3896  min=0.0  max=1.0
+  G         : mean=0.4025  std=0.3843  min=0.0  max=1.0
+  B         : mean=0.3989  std=0.3635  min=0.0  max=1.0
+
+── thumb ──
+  shape     : (768, 512)
+  overall   : mean=0.3896  std=0.3457
+  R         : mean=0.3951  std=0.3603  min=0.0  max=1.0
+  G         : mean=0.3916  std=0.3502  min=0.0  max=1.0
+  B         : mean=0.3821  std=0.3256  min=0.0  max=1.0
+======================================================================
+  TOP 10 COLORS (16-level quantized)
+======================================================================
+
+── poster ──
+  #01  RGB(221,221,204)  count=  343642  21.85%
+  #02  RGB(  0,  0,  0)  count=  219010  13.92%
+  #03  RGB( 68, 68, 68)  count=  106237  6.75%
+  #04  RGB( 85, 85, 85)  count=  104229  6.63%
+  #05  RGB( 51, 51, 51)  count=   96734  6.15%
+  #06  RGB(  0, 17, 17)  count=   72536  4.61%
+  #07  RGB(  0,  0, 17)  count=   65898  4.19%
+  #08  RGB(238,238,238)  count=   59720  3.80%
+  #09  RGB( 34, 51, 51)  count=   38104  2.42%
+  #10  RGB( 17, 34, 34)  count=   33259  2.12%
+
+── candidate ──
+  #01  RGB(  0,  0,  0)  count=  396496  25.21%
+  #02  RGB(238,238,238)  count=  334117  21.24%
+  #03  RGB(  0, 17, 17)  count=   71375  4.54%
+  #04  RGB(  0,  0, 17)  count=   66692  4.24%
+  #05  RGB(153,153,153)  count=   41876  2.66%
+  #06  RGB(170,170,170)  count=   37299  2.37%
+  #07  RGB(136,136,136)  count=   36521  2.32%
+  #08  RGB( 17, 34, 34)  count=   34321  2.18%
+  #09  RGB( 34, 51, 51)  count=   33293  2.12%
+  #10  RGB(170,170,153)  count=   32855  2.09%
+
+── thumb ──
+  #01  RGB(221,221,204)  count=   82651  21.02%
+  #02  RGB(  0,  0,  0)  count=   56384  14.34%
+  #03  RGB( 85, 85, 85)  count=   25932  6.59%
+  #04  RGB( 68, 68, 68)  count=   25251  6.42%
+  #05  RGB( 51, 51, 51)  count=   24742  6.29%
+  #06  RGB(  0, 17, 17)  count=   17506  4.45%
+  #07  RGB(  0,  0, 17)  count=   16271  4.14%
+  #08  RGB(238,238,238)  count=   14220  3.62%
+  #09  RGB( 34, 51, 51)  count=    9473  2.41%
+  #10  RGB( 17, 34, 34)  count=    8257  2.10%
+======================================================================
+  BAND ANALYSIS (top 0-20% | mid 20-78% | bot 78-100%)
+======================================================================
+
+── poster ──
+
+  [Top  (y=0–20%)]
+    mean brightness : 0.3439
+    contrast (std)  : 0.1927
+    grey_ratio      : 1.0  (>0.7=very grey)
+    edge density    : 0.015765
+    dominant color  : RGB(51,51,51) (27.1%)
+
+  [Mid  (y=20–78%)]
+    mean brightness : 0.2222
+    contrast (std)  : 0.2662
+    grey_ratio      : 0.6879  (>0.7=very grey)
+    edge density    : 0.014621
+    dominant color  : RGB(0,0,0) (24.0%)
+
+  [Bot  (y=78–100%)]
+    mean brightness : 0.876
+    contrast (std)  : 0.1145
+    grey_ratio      : 0.0217  (>0.7=very grey)
+    edge density    : 0.011829
+    dominant color  : RGB(221,221,204) (97.3%)
+
+── candidate ──
+
+  [Top  (y=0–20%)]
+    mean brightness : 0.7469
+    contrast (std)  : 0.1539
+    grey_ratio      : 0.9918  (>0.7=very grey)
+    edge density    : 0.005966
+    dominant color  : RGB(238,238,238) (24.8%)
+
+  [Mid  (y=20–78%)]
+    mean brightness : 0.2277
+    contrast (std)  : 0.2753
+    grey_ratio      : 0.7043  (>0.7=very grey)
+    edge density    : 0.012039
+    dominant color  : RGB(0,0,0) (26.2%)
+
+  [Bot  (y=78–100%)]
+    mean brightness : 0.5362
+    contrast (std)  : 0.4759
+    grey_ratio      : 1.0  (>0.7=very grey)
+    edge density    : 0.004878
+    dominant color  : RGB(238,238,238) (54.0%)
+======================================================================
+  COLOR DIFFERENCE: poster vs candidate
+======================================================================
+  mean_abs_diff: 0.201912
+  max_abs_diff: 1.0
+  mean_r_diff: 0.20674
+  mean_g_diff: 0.203391
+  mean_b_diff: 0.195606
+======================================================================
+  LARGE LIGHT PANELS (white/light rectangles)
+======================================================================
+
+── poster ──
+  y=1192–1535  x=   0–1024  area=22.3%  brightness=0.8763
+
+── candidate ──
+  y=   0–1535  x=   0–1024  area=99.9%  brightness=0.399
+  y= 153–1365  x=   0–  39  area=3.0%  brightness=0.9734
+  y= 153–1365  x= 985–1024  area=3.0%  brightness=0.9728
+======================================================================
+  BLANKNESS / UNIFORMITY DIAGNOSTIC
+======================================================================
+  Poster overall std: 0.346616
+  ✓  Std is in normal range for a photograph/AI image
+  Top-1 color covers 21.8% of pixels
+  ✓  Good color diversity
+  Band top std: 0.192735
+  Band mid std: 0.266197
+  Band bot std: 0.114499
+
+======================================================================
+  END OF REPORT
+======================================================================
