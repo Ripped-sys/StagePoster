@@ -134,3 +134,6 @@ results/
 # go build 的产物
 /backend/server
 /backend/poster-backend
+
+# ---- Playwright CLI temp files -------------------------------------------------
+.playwright-cli/

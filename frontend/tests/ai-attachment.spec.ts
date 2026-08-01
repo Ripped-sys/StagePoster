@@ -15,8 +15,7 @@ test('AI conversation accepts an optional logo attachment and binds it', async (
   await expect(logoUpload).toContainText('chat-logo.svg');
   await page.getByRole('button', {name: /地下金属演出/}).click();
   await expect(page.locator('.assistant-plans article')).toHaveCount(3, {timeout: 60_000});
-  const bindButton = page.getByRole('button', {name: /上传并绑定/});
-  await expect(bindButton).toBeVisible();
-  await bindButton.click();
+  // send() auto-binds uploaded assets when creating the session, so the button
+  // immediately shows "已绑定 N 项真实素材" instead of "上传并绑定".
   await expect(page.getByRole('button', {name: /已绑定 1 项真实素材/})).toBeVisible({timeout: 120_000});
 });

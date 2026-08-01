@@ -44,7 +44,10 @@ test('desktop poster MVP remains usable with live agent integration', async ({pa
   await page.locator('.form-actions .button').click();
   await expect(page).toHaveURL(/\/generate\//);
   await shot(page, '07-generation-progress.png', false);
-  await page.waitForURL(/\/result\//, {timeout: 420_000});
+  // Real backend presents candidates and waits for explicit selection.
+  await expect(page.getByRole('button', {name: '选择这张并合成'}).first()).toBeVisible({timeout: 420_000});
+  await page.getByRole('button', {name: '选择这张并合成'}).first().click();
+  await expect(page).toHaveURL(/\/result\//, {timeout: 420_000});
   await shot(page, '08-result-page.png');
   const [download] = await Promise.all([
     page.waitForEvent('download', {timeout: 30_000}),
