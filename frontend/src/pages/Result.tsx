@@ -14,58 +14,38 @@ import { toPng } from "html-to-image";
 import AssetUpload from "../components/AssetUpload";
 import Brand from "../components/Brand";
 import PosterPreview from "../components/PosterPreview";
+import PosterLanguageToggle from "../components/PosterLanguageToggle";
+import PublishPoster from "../components/PublishPoster";
+import SiteLanguageToggle from "../components/SiteLanguageToggle";
 import { posterApi } from "../services/posterApi";
 import { useStore } from "../store";
 import type { Participant, PosterProject } from "../types";
+import type {ImageMetadata, PosterReview, PosterTimeline, RuntimeEvidence} from "../types";
+import { localizedPosterCopy } from "../utils/posterLanguage";
+import {useSiteLanguage} from "../hooks/useSiteLanguage";
 
-async function renderRemotePublishPng(project: PosterProject, imageUrl: string) {
-  const canvas = document.createElement("canvas");
+async function renderElementPublishPng(node: HTMLElement) {
+  await document.fonts.ready;
+  for (const image of Array.from(node.querySelectorAll('img'))) {
+    if (!image.complete) await image.decode();
+  }
+  const source = await toPng(node, {
+    pixelRatio: Math.max(2, 1024 / Math.max(1, node.clientWidth)),
+    cacheBust: false,
+  });
+  const rendered = new Image();
+  rendered.src = source;
+  await rendered.decode();
+  const canvas = document.createElement('canvas');
   canvas.width = 1024;
   canvas.height = 1536;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("浏览器无法创建海报画布");
-  const image = new Image();
-  await new Promise<void>((resolve, reject) => {
-    const timeout = window.setTimeout(() => reject(new Error("生成图片加载超时，请稍后重试")), 20_000);
-    image.onload = () => { window.clearTimeout(timeout); resolve(); };
-    image.onerror = () => { window.clearTimeout(timeout); reject(new Error("生成图片无法读取")); };
-    image.src = imageUrl;
-  });
-  const scale = Math.max(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight);
-  const width = image.naturalWidth * scale;
-  const height = image.naturalHeight * scale;
-  context.drawImage(image, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
-  const shade = context.createLinearGradient(0, 0, 0, canvas.height);
-  shade.addColorStop(0, "rgba(0,0,0,.72)");
-  shade.addColorStop(.48, "rgba(0,0,0,.08)");
-  shade.addColorStop(1, "rgba(0,0,0,.9)");
-  context.fillStyle = shade;
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  const pad = 82;
-  context.fillStyle = "#ff784d";
-  context.font = "700 22px Arial";
-  context.fillText("POSTER VISUAL LAB · AMD ROCm", pad, 96);
-  context.fillStyle = "#ffffff";
-  context.font = "800 74px Arial, Microsoft YaHei";
-  const title = project.title || "未命名计划";
-  context.fillText(title.slice(0, 18), pad, 190);
-  context.fillStyle = "#f1dccd";
-  context.font = "400 24px Arial, Microsoft YaHei";
-  context.fillText((project.theme || "让真实信息，成为视觉的一部分").slice(0, 40), pad, 236);
-  context.strokeStyle = "rgba(255,255,255,.55)";
-  context.beginPath(); context.moveTo(pad, 1190); context.lineTo(canvas.width - pad, 1190); context.stroke();
-  context.fillStyle = "#ffffff";
-  context.font = "800 34px Arial, Microsoft YaHei";
-  context.fillText(project.bands.map((band) => band.name).join("  ·  ").slice(0, 34) || project.subject || "表演者", pad, 1270);
-  const columns = [["DATE / TIME", project.dateTime], ["VENUE", [project.city, project.venue].filter(Boolean).join(" · ")], ["TICKET", project.price || project.ticketInfo]];
-  const columnWidth = (canvas.width - pad * 2) / columns.length;
-  columns.forEach(([label, value], index) => {
-    const x = pad + columnWidth * index;
-    context.fillStyle = "#ff784d"; context.font = "700 16px Arial"; context.fillText(label, x, 1340);
-    context.fillStyle = "#ffffff"; context.font = "700 24px Arial, Microsoft YaHei"; context.fillText(String(value || "待确认").slice(0, 24), x, 1380);
-  });
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('浏览器无法创建海报画布');
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(rendered, 0, 0, 1024, 1536);
   return await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("海报导出失败")), "image/png");
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('海报导出失败')), 'image/png');
   });
 }
 
@@ -91,6 +71,7 @@ async function downloadDataUrl(href: string) {
 }
 
 export default function Result() {
+  const {english} = useSiteLanguage();
   const { id = "" } = useParams();
   const { projects, tasks, save } = useStore();
   const nav = useNavigate();
@@ -101,6 +82,13 @@ export default function Result() {
   const [exportError, setExportError] = useState("");
   const [resultAttempt, setResultAttempt] = useState(0);
   const [lightbox, setLightbox] = useState("");
+  const [lightboxScale, setLightboxScale] = useState(1);
+  const [timeline, setTimeline] = useState<PosterTimeline>();
+  const [reviews, setReviews] = useState<PosterReview[]>([]);
+  const [runtime, setRuntime] = useState<RuntimeEvidence>();
+  const [dependencies, setDependencies] = useState<Record<string, {status?: string; model?: string}>>();
+  const [imageMetadata, setImageMetadata] = useState<ImageMetadata>();
+  const [evidenceError, setEvidenceError] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const project = projects[id];
   const task = useMemo(
@@ -114,7 +102,7 @@ export default function Result() {
     let url = "";
     let active = true;
     setImageError("");
-    posterApi.resultBlob(task.id).then((blob) => {
+    posterApi.resultBlob(task).then((blob) => {
       if (active) {
         url = URL.createObjectURL(blob);
         setImageUrl(url);
@@ -127,6 +115,27 @@ export default function Result() {
       if (url) URL.revokeObjectURL(url);
     };
   }, [task, resultAttempt]);
+  useEffect(() => {
+    if (!task || task.source !== 'w7900') return;
+    let active = true;
+    Promise.allSettled([
+      posterApi.timeline(task.id),
+      posterApi.reviews(task.id),
+      posterApi.health(),
+      posterApi.dependencies(),
+      posterApi.imageMetadata(task),
+    ]).then((results) => {
+      if (!active) return;
+      if (results[0].status === 'fulfilled') setTimeline(results[0].value);
+      if (results[1].status === 'fulfilled') setReviews(results[1].value);
+      if (results[2].status === 'fulfilled') setRuntime(results[2].value);
+      if (results[3].status === 'fulfilled') setDependencies(results[3].value.dependencies);
+      if (results[4].status === 'fulfilled') setImageMetadata(results[4].value);
+      const failures = results.filter((result) => result.status === 'rejected').length;
+      setEvidenceError(failures ? `${failures} ${english ? 'evidence sources unavailable' : '项证据暂不可用'}` : '');
+    });
+    return () => { active = false; };
+  }, [task, resultAttempt, english]);
   if (!project)
     return (
       <main className="center-state">
@@ -136,6 +145,7 @@ export default function Result() {
         </button>
       </main>
     );
+  const posterCopy = localizedPosterCopy(project);
   const set = <K extends keyof PosterProject>(
     key: K,
     value: PosterProject[K],
@@ -147,12 +157,13 @@ export default function Result() {
       let href = "";
       if (task?.source === "w7900" && imageUrl) {
         try {
-          const blob = await withTimeout(renderRemotePublishPng(project, imageUrl), 15_000);
+          if (!ref.current) throw new Error('发布版尚未准备好');
+          const blob = await withTimeout(renderElementPublishPng(ref.current), 15_000);
           href = URL.createObjectURL(blob);
-        } catch {
-          // A browser can reject canvas export for a remote image. Keep the
-          // generated visual downloadable instead of leaving the button inert.
-          href = imageUrl;
+        } catch (reason) {
+          throw new Error(reason instanceof Error
+            ? `发布版导出失败：${reason.message}`
+            : '发布版导出失败，请稍后重试');
         }
       } else if (ref.current) {
         href = await toPng(ref.current, {
@@ -183,7 +194,7 @@ export default function Result() {
     setBusy(true);
     try {
       if (task?.source === "w7900" && imageUrl) {
-        const blob = await renderRemotePublishPng(project, imageUrl);
+        const blob = await renderElementPublishPng(ref.current!);
         setLightbox(URL.createObjectURL(blob));
       } else {
         setLightbox(await toPng(ref.current!, {pixelRatio: 2, cacheBust: true}));
@@ -206,38 +217,50 @@ export default function Result() {
     ["Logo 与二维码使用原始素材图层", "通过"],
     ["输出可下载为 PNG", "通过"],
   ];
+  const evidenceReviews = reviews.length ? reviews : timeline?.reviews ?? [];
+  const latestReview = evidenceReviews.reduce<PosterReview | undefined>((best, review) => !best || review.totalScore > best.totalScore ? review : best, undefined);
+  const reviewScores = latestReview?.scores ?? latestReview?.result?.scores;
+  const reviewFailures = latestReview?.hardFailures ?? latestReview?.result?.hardFailures;
+  const reviewIssues = latestReview?.issues ?? latestReview?.result?.issues;
+  const evidenceMetrics = timeline?.metrics;
+  const selectedCandidate = task?.candidates?.find((candidate) => candidate.candidateId === task.selectedCandidateId)
+    ?? task?.candidates?.find((candidate) => candidate.selected);
+  const selectedAnalysis = selectedCandidate?.visualAnalysis ?? selectedCandidate?.spec?.visualAnalysis;
+  const scoreRows: Array<[string, number | undefined]> = [
+    [english ? 'Requirement alignment' : '需求匹配', reviewScores?.requirementAlignment],
+    [english ? 'Composition' : '构图', reviewScores?.composition],
+    [english ? 'Typography' : '排版', reviewScores?.typography],
+    [english ? 'Readability' : '可读性', reviewScores?.readability],
+    [english ? 'Visual quality' : '视觉质量', reviewScores?.visualQuality],
+    [english ? 'Brand consistency' : '品牌一致性', reviewScores?.brandConsistency],
+  ];
+  const displayScore = (score?: number) => score == null ? 0 : score <= 1 ? Math.round(score * 100) : Math.round(score);
   return (
     <main className="result">
       <nav>
         <Brand />
         <span>RESULT / {id.slice(0, 8).toUpperCase()}</span>
-        <button className="ghost-button" onClick={() => nav(editUrl)}>
-          <ArrowLeft /> 返回编辑
-        </button>
+        <div className="workspace-top-actions"><SiteLanguageToggle/><button className="ghost-button" onClick={() => nav(editUrl)}>
+          <ArrowLeft /> {english ? 'Back to edit' : '返回编辑'}
+        </button></div>
       </nav>
       <div className="result-layout">
         <section className="result-canvas">
+          <PosterLanguageToggle
+            value={posterCopy.language}
+            onChange={(language) => set("posterLanguage", language)}
+          />
           <div className="result-status">
             <CheckCircle2 /> 生成完成{" "}
             <span>
               {task?.source === "w7900"
-                ? "AMD W7900 实际输出"
+                ? "AMD W7900 主视觉 · 精确信息层"
                 : "本地 Mock 输出"}
             </span>
           </div>
           {task?.source === "w7900" ? (
             imageUrl ? (
-              <div className="session-publish-poster result-publish-poster" ref={ref}>
-                <img className="session-publish-visual" src={imageUrl} alt={`${project.title} AI 主视觉`}/>
-                <div className="session-publish-shade"/>
-                <div className="session-publish-copy">
-                  <small>POSTER VISUAL LAB · AMD ROCm</small>
-                  <h2>{project.title}</h2><p>{project.theme}</p>
-                  <div className="session-publish-bands">{project.bands.map((band) => <span key={band.id}>{band.logo?.dataUrl ? <img src={band.logo.dataUrl} alt={`${band.name} Logo`}/> : <b>{band.name}</b>}</span>)}</div>
-                  <dl><div><dt>DATE / TIME</dt><dd>{project.dateTime}</dd></div><div><dt>VENUE</dt><dd>{[project.city, project.venue].filter(Boolean).join(' · ')}</dd></div>{project.price && <div><dt>TICKET</dt><dd>{project.price}</dd></div>}</dl>
-                  {project.assets.qr?.dataUrl && <img className="session-publish-qr" src={project.assets.qr.dataUrl} alt="购票二维码"/>}
-                </div>
-              </div>
+              <PublishPoster project={project} visualUrl={imageUrl} nodeRef={ref} palette={task?.palette ?? selectedCandidate?.spec?.palette} template={task?.composerTemplate} analysis={selectedCandidate?.visualAnalysis ?? selectedCandidate?.spec?.visualAnalysis}/>
             ) : imageError ? (
               <div className="gpu-result loading-result error-state" role="alert">
                 <AlertTriangle />
@@ -261,6 +284,7 @@ export default function Result() {
               <Download />
               {busy ? "正在导出…" : "导出 PNG"}
             </button>
+            {imageUrl && <a className="ghost-button" href={imageUrl} download={`poster-${project.title}-visual.png`}><Download/> {english ? 'Raw visual' : '原始主视觉'}</a>}
             <button className="ghost-button" onClick={() => void previewLarge()} disabled={busy}><Maximize2/> 放大</button>
           </div>
           {exportError && <div className="assistant-error" role="alert"><b>导出失败</b><span>{exportError}</span><button onClick={() => setExportError("")}>关闭</button></div>}
@@ -298,18 +322,49 @@ export default function Result() {
                 </div>
               ))}
               {!isRemoteResult && <div className="warning-box"><b>当前不是 GPU 实际输出</b><p>此页面用于检查信息图层、布局与 PNG 导出；连接远程生成服务后才能进行最终发布检查。</p></div>}
+              {isRemoteResult && <section className="adaptive-evidence" aria-label="Adaptive compositor evidence">
+                <header><div><small>ADAPTIVE COMPOSITOR</small><h3>{english ? 'Background-aware typography' : '背景驱动排版证据'}</h3></div><strong className={selectedAnalysis?.hasGeneratedText === false ? 'accepted' : 'warning'}>{selectedAnalysis ? (selectedAnalysis.hasGeneratedText === false ? 'CLEAN' : 'CHECK') : 'N/A'}</strong></header>
+                {selectedAnalysis ? <>
+                  <div className="adaptive-metrics">
+                    <div><small>{english ? 'Text-safe zones' : '文字安全区'}</small><b>{selectedAnalysis.textSafeZones?.length ?? 0}</b></div>
+                    <div><small>{english ? 'Protected subjects' : '主体保护区'}</small><b>{selectedAnalysis.subjectBounds?.length ?? 0}</b></div>
+                    <div><small>{english ? 'Contrast' : '背景对比度'}</small><b>{selectedAnalysis.contrast ?? '—'}</b></div>
+                    <div><small>{english ? 'OCR detections' : 'OCR 文字'}</small><b>{selectedAnalysis.ocrDetections?.length ?? 0}</b></div>
+                  </div>
+                  <div className="adaptive-palette">{(selectedAnalysis.palette ?? selectedAnalysis.dominantColors ?? selectedCandidate?.spec?.palette ?? []).map((color) => <i key={color} style={{background: color}} title={color}/>)}</div>
+                  <p>{selectedAnalysis.texture || selectedAnalysis.style || (english ? 'Backend analysed layout is active.' : '已使用后端分析结果选择字体、颜色和文字位置。')}</p>
+                  {selectedAnalysis.hasGeneratedText !== false && <div className="warning-box"><b>{english ? 'Generated text needs review' : '检测到模型文字风险'}</b><p>{english ? 'Inspect the raw visual before publishing.' : '请在发布前检查原始主视觉；前端不会将此状态伪装为通过。'}</p></div>}
+                </> : <p>{english ? 'The backend did not provide visual analysis for this legacy result. Conservative layout is active.' : '该历史结果未提供视觉分析，当前使用保守安全布局。'}</p>}
+              </section>}
+              {isRemoteResult && <section className="quality-review" aria-label="AI quality review">
+                <header><div><small>AI QUALITY REVIEW</small><h3>{english ? 'Visual quality evidence' : '视觉质量证据'}</h3></div><strong className={latestReview && /accept/i.test(latestReview.decision) ? 'accepted' : 'warning'}>{latestReview ? `${latestReview.totalScore}/100` : '—'}</strong></header>
+                {latestReview ? <>
+                  <div className="quality-score-grid">{scoreRows.map(([label, score]) => <div key={label}><span>{label}<b>{score == null ? '—' : displayScore(score)}</b></span><i><em style={{width: `${displayScore(score)}%`}}/></i></div>)}</div>
+                  <p className="quality-decision"><b>{latestReview.decision}</b> · {/accept/i.test(latestReview.decision) ? (english ? 'Accepted for publish' : '达到发布标准') : (english ? 'Best available result retained; review the advice before publishing' : '已保留当前最佳版本，发布前请检查优化建议')}</p>
+                  {!!reviewFailures?.length && <div className="quality-failures"><b>{english ? 'Hard failures' : '硬失败项'}</b>{reviewFailures.map((failure) => <p key={failure.code}><strong>{failure.code}</strong>{failure.description}</p>)}</div>}
+                  {!!reviewIssues?.length && <div className="quality-issues"><b>{english ? 'Review findings' : '审查发现'}</b>{reviewIssues.map((issue) => <article key={`${issue.code}-${issue.description}`}><span>{issue.severity}</span><strong>{issue.description}</strong>{issue.suggestion && <p>{issue.suggestion}</p>}</article>)}</div>}
+                </> : <p>{english ? 'No visual review has been recorded yet.' : '尚未产生视觉复审记录。'}</p>}
+                {evidenceError && <small className="evidence-error">{evidenceError}</small>}
+              </section>}
             </div>
           )}
           {tab === "edit" && (
             <div className="tab-content">
               <p>
-                文字修改继续保存在项目中；真实输出图目前由 GPU 服务直接返回。
+                文字修改会即时更新精确信息图层；GPU 只提供无字主视觉。
               </p>
               <label className="field">
-                <span>活动标题</span>
+                <span>{posterCopy.language === "en" ? "活动标题 / TITLE" : "活动标题"}</span>
                 <input
-                  value={project.title}
-                  onChange={(e) => set("title", e.target.value)}
+                  value={posterCopy.language === "en" ? project.titleEn ?? "" : project.title}
+                  onChange={(e) => posterCopy.language === "en" ? set("titleEn", e.target.value) : set("title", e.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>{posterCopy.language === "en" ? "主题文案 / TAGLINE" : "主题文案"}</span>
+                <input
+                  value={posterCopy.language === "en" ? project.themeEn ?? "" : project.theme}
+                  onChange={(e) => posterCopy.language === "en" ? set("themeEn", e.target.value) : set("theme", e.target.value)}
                 />
               </label>
               <label className="field">
@@ -320,10 +375,10 @@ export default function Result() {
                 />
               </label>
               <label className="field">
-                <span>地点</span>
+                <span>{posterCopy.language === "en" ? "地点 / VENUE" : "地点"}</span>
                 <input
-                  value={project.venue}
-                  onChange={(e) => set("venue", e.target.value)}
+                  value={posterCopy.language === "en" ? project.venueEn ?? "" : project.venue}
+                  onChange={(e) => posterCopy.language === "en" ? set("venueEn", e.target.value) : set("venue", e.target.value)}
                 />
               </label>
               {project.bands[0] && (
@@ -356,13 +411,31 @@ export default function Result() {
                   <b>{value}</b>
                 </div>
               ))}
+              <details className="technical-evidence">
+                <summary>{english ? 'Generation details' : '生成详情'} <small>{english ? 'ROCm evidence' : 'ROCm 推理证据'}</small></summary>
+                <div className="evidence-grid">
+                  <div><span>GPU</span><b>{runtime?.gpu?.model ?? '未提供'}</b></div>
+                  <div><span>{english ? 'VRAM' : '显存'}</span><b>{runtime?.gpu?.vramUsedGB != null ? `${runtime.gpu.vramUsedGB} / ${runtime.gpu.vramTotalGB ?? '—'} GB` : '未提供'}</b></div>
+                  <div><span>ROCm</span><b>{task?.metrics.rocm || '未提供'}</b></div>
+                  <div><span>ComfyUI</span><b>{runtime?.comfyui?.workflowVersion ?? dependencies?.comfyui?.status ?? '未提供'}</b></div>
+                  <div><span>VLM</span><b>{runtime?.vlm?.model ?? dependencies?.vlm?.model ?? '未提供'}</b></div>
+                  <div><span>{english ? 'Wall clock' : '总耗时'}</span><b>{evidenceMetrics?.wallClockSeconds != null ? `${evidenceMetrics.wallClockSeconds}s` : task?.elapsedSeconds != null ? `${task.elapsedSeconds}s` : '未提供'}</b></div>
+                  <div><span>{english ? 'Review latency' : '复审耗时'}</span><b>{evidenceMetrics?.reviewLatencyMs != null ? `${Math.round(evidenceMetrics.reviewLatencyMs / 1000)}s` : '未提供'}</b></div>
+                  <div><span>Tokens</span><b>{evidenceMetrics?.totalTokens ?? '未提供'}</b></div>
+                  <div><span>{english ? 'Review rounds' : '复审轮次'}</span><b>{evidenceMetrics?.reviewRounds ?? '未提供'}</b></div>
+                  <div><span>{english ? 'Candidate' : '候选图'}</span><b>{selectedCandidate?.variantName ?? '未提供'}</b></div>
+                  <div><span>Seed / Attempt</span><b>{selectedCandidate?.seed ?? '—'} / {selectedCandidate?.attempt ?? '—'}</b></div>
+                  <div><span>{english ? 'Image' : '图片质量'}</span><b>{imageMetadata ? `${imageMetadata.width} × ${imageMetadata.height} · ${imageMetadata.aspectRatio} · ${(imageMetadata.sizeBytes / 1024 / 1024).toFixed(2)} MB` : '未提供'}</b></div>
+                </div>
+              </details>
             </div>
           )}
         </aside>
       </div>
-      {lightbox && <div className="poster-lightbox" role="dialog" aria-modal="true" aria-label="最终海报大图" onClick={() => setLightbox("")}>
+      {lightbox && <div className="poster-lightbox" role="dialog" aria-modal="true" aria-label="最终海报大图" onClick={() => {setLightbox(""); setLightboxScale(1);}}>
         <button type="button" onClick={() => setLightbox("")} aria-label="关闭大图"><X/></button>
-        <img src={lightbox} alt={`${project.title} 最终发布版`} onClick={(event) => event.stopPropagation()}/>
+        <div className="lightbox-zoom" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => setLightboxScale((scale) => Math.max(.5, scale - .25))}>−</button><b>{Math.round(lightboxScale * 100)}%</b><button type="button" onClick={() => setLightboxScale((scale) => Math.min(3, scale + .25))}>＋</button></div>
+        <img src={lightbox} alt={`${project.title} 最终发布版`} style={{transform: `scale(${lightboxScale})`}} onClick={(event) => event.stopPropagation()}/>
         <a href={lightbox} download={`poster-${project.title}.png`} onClick={(event) => event.stopPropagation()}><Download/> 下载图片</a>
       </div>}
     </main>

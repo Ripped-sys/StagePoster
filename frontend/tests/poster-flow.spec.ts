@@ -14,6 +14,7 @@ function captureErrors(page: Page) {
 }
 
 test('desktop poster MVP remains usable with live agent integration', async ({page}) => {
+  test.skip(process.env.RUN_LIVE_E2E !== '1', 'Set RUN_LIVE_E2E=1 for the several-minute public GPU flow');
   // A cold W7900/ComfyUI run can take several minutes over the public tunnel.
   test.setTimeout(480_000);
   const errors = captureErrors(page);
@@ -63,6 +64,20 @@ test('mobile landing and create have no horizontal overflow', async ({page}) => 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
   await shot(page, '10-create-mobile-live-agent.png');
   expect(errors).toEqual([]);
+});
+
+test('workspace navigation stays outside the sidebar and interface language persists', async ({page}) => {
+  await page.setViewportSize({width: 1280, height: 720});
+  await page.goto('/create');
+  const sidebar = await page.locator('.steps').boundingBox();
+  const actions = await page.locator('.workspace-top-actions').boundingBox();
+  expect(sidebar).not.toBeNull();
+  expect(actions).not.toBeNull();
+  expect(actions!.x).toBeGreaterThanOrEqual(sidebar!.x + sidebar!.width);
+  await page.getByLabel('界面语言 / Interface language').getByRole('button', {name: 'EN'}).click();
+  await expect(page.locator('.workspace-top-actions .ghost-button')).toContainText('Home');
+  await page.reload();
+  await expect(page.getByLabel('界面语言 / Interface language').getByRole('button', {name: 'EN'})).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('required fields still block generation and return to scene step', async ({page}) => {

@@ -1,37 +1,281 @@
-import type{GenerationTask,PosterProject}from'../types';
+import type {
+  GenerationCandidate,
+  GenerationTask,
+  PosterReview,
+  PosterTimeline,
+  PosterProject,
+  RuntimeEvidence,
+  UploadedAsset,
+} from '../types';
+import {formatPosterLocation} from '../utils/posterLanguage';
 
-const BASE=((import.meta.env.VITE_API_BASE_URL as string|undefined)??(import.meta.env.VITE_API_URL as string|undefined)??'http://127.0.0.1:8080').replace(/\/$/,'');
-const TOKEN=(import.meta.env.VITE_POSTER_TOKEN as string|undefined)??'';
-const metrics={gpu:'AMD Radeon Pro W7900',rocm:'远程 GPU 节点',resolution:'服务端输出',duration:'W7900 推理中…',peakVram:'由 GPU 服务管理'};
-interface Created{jobId:string;promptId:string;status:string;seed:number}
-interface RemoteJob{jobId:string;status:'queued'|'running'|'succeeded'|'failed';result?:{filename:string;type:string};error?:string}
-interface Health{status:string;comfy:string;tokenRequired:boolean}
+const BASE = ((import.meta.env.VITE_API_BASE_URL as string | undefined)
+  ?? (import.meta.env.VITE_API_URL as string | undefined)
+  ?? 'http://127.0.0.1:8080').replace(/\/$/, '');
+const TOKEN = (import.meta.env.VITE_POSTER_TOKEN as string | undefined) ?? '';
 
-async function json<T>(path:string,init?:RequestInit):Promise<T>{let last:unknown;for(let attempt=0;attempt<3;attempt+=1){try{const response=await fetch(`${BASE}${path}`,{...init,headers:{Accept:'application/json',...init?.headers}});if(response.ok)return response.json() as Promise<T>;if(response.status<500||attempt===2)throw new Error(`StagePoster API ${response.status}: ${await response.text()}`)}catch(error){last=error;if(attempt<2)await new Promise(resolve=>window.setTimeout(resolve,500*(attempt+1)));}}throw last instanceof Error?last:new Error('StagePoster API 暂时不可用')}
-
-const SYSTEM_VISUAL_PROMPT=`You are the visual-art director for a Chinese independent live-music project. Create only the image layer that sits beneath programmatic typography, original band logos and ticket information. The house style is distilled from a real archive of Xi'an underground-show artwork rather than commercial concert advertising: handmade cut-and-paste collage, photocopy and risograph grain, uneven screen-print ink, torn and weathered surfaces, accidental registration errors, analog photographic blur, raw drawings, found objects, symbolic imagery and experimental editorial spacing. The work may feel gothic, absurd, poetic or digitally damaged, but must always feel locally made, specific and imperfect. Favor one memorable visual metaphor over a literal generic concert scene. Use a vertical 2:3 canvas, deliberate asymmetry or severe centered symmetry, bold value contrast, tactile material depth and controlled visual density. Reserve usable breathing room near the top and bottom for the application's exact information layers. Avoid polished commercial advertising, generic festival photography, stock imagery, esports styling and glossy AI-render aesthetics.`;
-
-const STRICT_VISUAL_RULES=`Artwork only. Absolutely no words, Chinese characters, English letters, numbers, logos, band names, captions, signs, watermark, QR code, interface elements, fake typography or symbols resembling writing. Do not generate a recognizable human face unless explicitly requested. Avoid stadiums, football fields, generic leather-jacket portraits, glossy 3D rendering, esports aesthetics, stock photography, plastic skin, excessive neon and generic cyberpunk cities. The frontend will add all factual text, original logos and QR codes as deterministic layers.`;
-
-const STYLE_PROMPTS:Record<string,string>={
- rock:'ARCHIVE STYLE — OCCULT METAL COLLAGE. Use charcoal black, dirty bone white, dried-blood red, oxidized brown and muted gray-green. Combine decayed classical imagery, thorn or bone-like ornament, corroded metal, smoke, ritual objects and distressed paper into a dense but controlled collage. Favor confrontational symmetry, a monumental central emblem or two opposing symbolic masses. Add photocopy noise, scratched ink, torn edges and imperfect screen-print registration. The mood is solemn, dangerous, ancient and theatrical, never a clean modern rock photograph.',
- cyber:'ARCHIVE STYLE — EXPERIMENTAL DIGITAL ZINE. Use deep blue-black with restrained electric cyan, acid green, violet and magenta. Combine analog video feedback, RGB channel separation, halftone dots, scan noise, blurred documentary fragments, translucent waveforms and awkward floating geometric shapes. Use asymmetric editorial spacing and deliberate low-resolution artifacts. The result should resemble a small independent club flyer assembled from damaged screens and photocopies, not glossy cyberpunk concept art.',
- editorial:'ARCHIVE STYLE — POETIC DIY EDITORIAL. Use warm off-white, charcoal, faded forest green, muted rust and one unexpected fluorescent accent. Build the image from a single poetic subject, found photography, primitive hand-drawn marks, cut paper, risograph texture and generous quiet space. Allow unusual cropping and modest asymmetry. The result should feel intimate, literary, inexpensive and handmade, with the calm tension of an independent-music poster rather than a corporate minimalist template.'
+const metrics = {
+  gpu: 'AMD Radeon Pro W7900',
+  rocm: '远程 GPU 节点',
+  resolution: '1024 × 1536',
+  duration: 'W7900 推理中…',
+  peakVram: '由 GPU 服务管理',
 };
 
-export function buildPosterPrompt(project:PosterProject){
- const genres=[...new Set(project.bands.map(b=>b.genre.trim()).filter(Boolean))].join(', ');
- const bandContext=project.bands.length>1?`${project.bands.length} contrasting musical identities in visual tension.`:project.bands.length===1?'One central musical identity.':'';
- const eventConcept=[project.theme,project.subject,bandContext,genres&&`Musical atmosphere: ${genres}.`,project.city&&`Cultural atmosphere inspired by ${project.city}.`].filter(Boolean).join(' ');
- return [SYSTEM_VISUAL_PROMPT,STYLE_PROMPTS[project.styleId]??STYLE_PROMPTS.rock,`Event concept to interpret visually: ${eventConcept}`,STRICT_VISUAL_RULES].join(' ');
+interface RemoteAsset {
+  assetId: string;
 }
 
-export const posterApi={
- health:()=>json<Health>('/health'),
- async submit(project:PosterProject):Promise<GenerationTask>{const seed=Math.abs(project.visualSeed||Math.floor(Math.random()*2_147_483_647));const created=await json<Created>('/api/generate',{method:'POST',headers:{'Content-Type':'application/json',...(TOKEN?{'X-Poster-Token':TOKEN}:{})},body:JSON.stringify({prompt:buildPosterPrompt(project),seed})});return{id:created.jobId,projectId:project.id,step:0,progress:2,status:'running',startedAt:Date.now(),metrics,source:'w7900'}},
- async getJob(task:GenerationTask):Promise<GenerationTask>{const remote=await json<RemoteJob>(`/api/jobs/${task.id}`,{headers:TOKEN?{'X-Poster-Token':TOKEN}:{}});if(remote.status==='failed')return{...task,status:'failed',error:remote.error??'GPU generation failed'};if(remote.status==='succeeded')return{...task,status:'complete',step:5,progress:100,outputUrl:`${BASE}/api/jobs/${task.id}/result`,metrics:{...task.metrics,duration:`${((Date.now()-task.startedAt)/1000).toFixed(1)} s · W7900`}};const elapsed=Date.now()-task.startedAt;const progress=remote.status==='queued'?8:Math.min(88,20+Math.round(elapsed/1200));return{...task,step:remote.status==='queued'?0:2,progress,status:'running'}},
- async resultBlob(jobId:string){const response=await fetch(`${BASE}/api/jobs/${jobId}/result`,{headers:{'X-Poster-Token':TOKEN}});if(!response.ok)throw new Error(`Result ${response.status}`);return response.blob()},
- resultUrl:(jobId:string)=>`${BASE}/api/jobs/${jobId}/result`
+interface PosterResponse {
+  posterId: string;
+  status: string;
+  resultUrl?: string;
+  error?: string;
+  progress?: {
+    completed?: number;
+    total?: number;
+    stage?: string;
+    percent?: number;
+    elapsedSeconds?: number;
+    etaSeconds?: number;
+  };
+  candidates?: GenerationCandidate[];
+  selectedCandidateId?: string;
+}
+
+function authHeaders(): Record<string, string> {
+  return TOKEN ? {'X-Poster-Token': TOKEN} : {};
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const method = (init.method ?? 'GET').toUpperCase();
+  const attempts = method === 'GET' || method === 'HEAD' ? 3 : 1;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 300_000);
+    try {
+      const response = await fetch(`${BASE}${path}`, {
+        ...init,
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json',
+          ...authHeaders(),
+          ...init.headers,
+        },
+      });
+      const body = await response.json().catch(() => null) as ({error?: string} & T) | null;
+      if (response.ok) return body as T;
+      throw new Error(body?.error || `StagePoster API ${response.status}`);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts - 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 700 * (attempt + 1)));
+      }
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('StagePoster API 暂时不可用');
+}
+
+async function uploadBlob(asset: UploadedAsset): Promise<Blob> {
+  const response = await fetch(asset.dataUrl);
+  const source = await response.blob();
+  if (source.type === 'image/png' || source.type === 'image/jpeg') return source;
+  const image = new Image();
+  image.src = asset.dataUrl;
+  await image.decode();
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, image.naturalWidth || 1024);
+  canvas.height = Math.max(1, image.naturalHeight || 1024);
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('无法准备素材上传');
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('素材转码失败')), 'image/png');
+  });
+}
+
+async function uploadAsset(projectId: string, asset: UploadedAsset, kind: 'logo' | 'reference') {
+  const cacheKey = `poster-remote-assets:${projectId}`;
+  const cache = JSON.parse(localStorage.getItem(cacheKey) ?? '{}') as Record<string, string>;
+  if (cache[asset.id]) return cache[asset.id];
+  const form = new FormData();
+  form.append('file', await uploadBlob(asset), asset.name.replace(/\.[^.]+$/, '.png'));
+  form.append('kind', kind);
+  const uploaded = await request<RemoteAsset>('/api/assets', {method: 'POST', body: form});
+  cache[asset.id] = uploaded.assetId;
+  localStorage.setItem(cacheKey, JSON.stringify(cache));
+  return uploaded.assetId;
+}
+
+function posterTask(projectId: string, response: PosterResponse, startedAt: number): GenerationTask {
+  const complete = response.status === 'succeeded';
+  const failed = response.status === 'failed' || response.status === 'canceled';
+  const progress = response.progress?.percent ?? (complete ? 100 : 20);
+  const step = complete ? 5 : progress >= 65 ? 3 : progress >= 60 ? 2 : 1;
+  return {
+    id: response.posterId,
+    projectId,
+    step,
+    progress,
+    status: failed ? 'failed' : complete ? 'complete' : 'running',
+    startedAt,
+    metrics: {
+      ...metrics,
+      duration: complete
+        ? `${response.progress?.elapsedSeconds ?? Math.round((Date.now() - startedAt) / 1000)} s · W7900`
+        : 'W7900 推理中…',
+    },
+    outputUrl: complete ? `${BASE}${response.resultUrl ?? `/api/posters/${response.posterId}/result`}` : undefined,
+    error: failed ? response.error ?? `任务已${response.status === 'canceled' ? '取消' : '失败'}` : undefined,
+    source: 'w7900',
+    remoteStatus: response.progress?.stage ?? response.status,
+    candidates: response.candidates ?? [],
+    elapsedSeconds: response.progress?.elapsedSeconds,
+    etaSeconds: response.progress?.etaSeconds,
+    selectedCandidateId: response.selectedCandidateId,
+  };
+}
+
+const styleColors: Record<string, string[]> = {
+  rock: ['oxide red', 'ink black', 'dirty bone white'],
+  cyber: ['electric cyan', 'deep violet', 'ink black'],
+  editorial: ['warm off-white', 'charcoal', 'muted rust'],
 };
 
-export function localMockTask(projectId:string):GenerationTask{return{id:projectId,projectId,step:0,progress:4,status:'running',startedAt:Date.now(),metrics:{gpu:'浏览器本地 Mock',rocm:'未连接',resolution:'1024 × 1536',duration:'本地 Mock',peakVram:'—'},source:'local'}}
+export const posterApi = {
+  health: () => request<RuntimeEvidence & {tokenRequired?: boolean}>('/health'),
+  dependencies: () => request<{status?: string; dependencies?: Record<string, {status?: string; model?: string}>; capabilities?: Record<string, {available?: boolean; reason?: string; influences?: string[]; controlMode?: string}>}>('/api/system/dependencies'),
+  timeline: (posterId: string) => request<PosterTimeline>(`/api/posters/${encodeURIComponent(posterId)}/timeline`),
+  reviews: async (posterId: string) => {
+    const response = await request<{items?: PosterReview[]; reviews?: PosterReview[]}>(`/api/posters/${encodeURIComponent(posterId)}/reviews?limit=20&offset=0`);
+    return response.items ?? response.reviews ?? [];
+  },
+
+  async submit(project: PosterProject): Promise<GenerationTask> {
+    const referenceAssetId = project.assets.reference
+      ? await uploadAsset(project.id, project.assets.reference, 'reference')
+      : undefined;
+    const artistLogo = project.bands.find((band) => band.logo)?.logo;
+    const artistLogoAssetId = artistLogo
+      ? await uploadAsset(project.id, artistLogo, 'logo')
+      : undefined;
+    const eventLogoAssetId = project.assets.organizerLogo
+      ? await uploadAsset(project.id, project.assets.organizerLogo, 'logo')
+      : undefined;
+    const [date = '', time = ''] = project.dateTime.trim().split(/\s+/, 2);
+    const payload = {
+      event: {
+        title: project.title,
+        artist: project.bands.map((band) => band.name).filter(Boolean).join(' & ') || project.subject,
+        date,
+        time,
+        venue: formatPosterLocation(project.city, project.venue),
+        presalePrice: project.price,
+      },
+      visual: {
+        style: 'metal-gothic-v1',
+        theme: project.theme,
+        musicGenre: project.bands.map((band) => band.genre).filter(Boolean).join(' / '),
+        mood: [project.theme, project.subject].filter(Boolean),
+        preferredColors: styleColors[project.styleId] ?? styleColors.rock,
+        ...(referenceAssetId ? {referenceAssetId, controlStrength: 0.35} : {}),
+      },
+      branding: {
+        ...(artistLogoAssetId ? {artistLogoAssetId} : {}),
+        ...(eventLogoAssetId ? {eventLogoAssetId} : {}),
+      },
+    };
+    const startedAt = Date.now();
+    const created = await request<PosterResponse>('/api/posters', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json; charset=utf-8'},
+      body: JSON.stringify(payload),
+    });
+    return posterTask(project.id, created, startedAt);
+  },
+
+  async getPoster(task: GenerationTask): Promise<GenerationTask> {
+    const response = await request<PosterResponse>(`/api/posters/${encodeURIComponent(task.id)}`);
+    return posterTask(task.projectId, response, task.startedAt);
+  },
+
+  async selectCandidate(task: GenerationTask, candidateId: string): Promise<GenerationTask> {
+    const response = await request<PosterResponse>(`/api/posters/${encodeURIComponent(task.id)}/select`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json; charset=utf-8'},
+      body: JSON.stringify({candidateId}),
+    });
+    return posterTask(task.projectId, response, task.startedAt);
+  },
+
+  async cancel(task: GenerationTask): Promise<GenerationTask> {
+    const response = await request<PosterResponse>(`/api/posters/${encodeURIComponent(task.id)}/cancel`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json; charset=utf-8'},
+      body: JSON.stringify({}),
+    });
+    return posterTask(task.projectId, response, task.startedAt);
+  },
+
+  async retryCandidate(task: GenerationTask, candidateId: string): Promise<GenerationTask> {
+    const response = await request<PosterResponse>(`/api/posters/${encodeURIComponent(task.id)}/candidates/${encodeURIComponent(candidateId)}/retry`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json; charset=utf-8'},
+      body: JSON.stringify({}),
+    });
+    return posterTask(task.projectId, response, task.startedAt);
+  },
+
+  async resultBlob(task: GenerationTask) {
+    const selectedVisual = task.candidates?.find((candidate) => candidate.selected && candidate.imageUrl)
+      ?? task.candidates?.find((candidate) => candidate.status === 'ready' && candidate.imageUrl);
+    const path = selectedVisual?.imageUrl
+      ? (/^https?:\/\//i.test(selectedVisual.imageUrl) ? selectedVisual.imageUrl : `${BASE}${selectedVisual.imageUrl}`)
+      : `${BASE}/api/posters/${encodeURIComponent(task.id)}/result`;
+    const response = await fetch(path, {
+      headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error(`Result ${response.status}`);
+    return response.blob();
+  },
+
+  async imageMetadata(task: GenerationTask) {
+    const blob = await this.resultBlob(task);
+    const url = URL.createObjectURL(blob);
+    try {
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      const divisor = greatestCommonDivisor(image.naturalWidth, image.naturalHeight);
+      return {width: image.naturalWidth, height: image.naturalHeight, format: blob.type || 'image/png', sizeBytes: blob.size, aspectRatio: `${image.naturalWidth / divisor}:${image.naturalHeight / divisor}`};
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  },
+
+  resultUrl: (posterId: string) => `${BASE}/api/posters/${encodeURIComponent(posterId)}/result`,
+  imageUrl: (path?: string) => path ? (/^https?:\/\//i.test(path) ? path : `${BASE}${path}`) : undefined,
+};
+
+function greatestCommonDivisor(a: number, b: number): number {
+  let left = Math.abs(a);
+  let right = Math.abs(b);
+  while (right) [left, right] = [right, left % right];
+  return left || 1;
+}
+
+export function localMockTask(projectId: string): GenerationTask {
+  return {
+    id: projectId,
+    projectId,
+    step: 0,
+    progress: 4,
+    status: 'running',
+    startedAt: Date.now(),
+    metrics: {gpu: '浏览器本地 Mock', rocm: '未连接', resolution: '1024 × 1536', duration: '本地 Mock', peakVram: '—'},
+    source: 'local',
+  };
+}
